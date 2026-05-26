@@ -6,6 +6,7 @@ Chamado quando o aluno clica em 'Executar agora' no Telegram.
 import logging
 import os
 import re
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 import aiohttp
 from web3 import Web3
 try:
@@ -255,12 +256,39 @@ def _normalizar_endereco(addr: str | None) -> str | None:
         return None
 
 
-def _to_wei_amount(chain_id: int, token_symbol: str, amount_usd: float) -> int:
+def _to_base_units(amount: float | int | str | Decimal, decimals: int) -> int:
+    """Converte valor humano para unidades base com arredondamento para baixo."""
+    if decimals < 0:
+        return 0
+    try:
+        amount_dec = Decimal(str(amount))
+    except (InvalidOperation, ValueError, TypeError):
+        return 0
+    if amount_dec <= 0:
+        return 0
+
+    scale = Decimal(10) ** decimals
+    return int((amount_dec * scale).to_integral_value(rounding=ROUND_DOWN))
+
+
+def _base_units_to_amount_str(units: int, decimals: int) -> str:
+    """Converte unidades base para string decimal precisa sem notação científica."""
+    if decimals < 0:
+        return "0"
+    if units <= 0:
+        return "0"
+
+    scale = Decimal(10) ** decimals
+    amount = Decimal(units) / scale
+    return format(amount.normalize(), "f")
+
+
+def _to_wei_amount(chain_id: int, token_symbol: str, amount_usd: float | int | str | Decimal) -> int:
     token_addr = TOKENS.get(chain_id, {}).get(token_symbol)
     if not token_addr:
         return 0
     decimais = _token_decimais(chain_id, token_addr)
-    return int(amount_usd * (10 ** decimais))
+    return _to_base_units(amount_usd, decimais)
 
 
 def _token_balance_wei(
@@ -513,7 +541,7 @@ async def buscar_rota_swap(
     chain_id:   int,
     token_from: str,   # símbolo ex: "USDT"
     token_to:   str,   # símbolo ex: "BRZ"
-    amount_usd: float,
+    amount_usd: float | int | str,
     wallet:     str,
     slippage_pct: str | None = None,
 ) -> dict | None:
@@ -530,8 +558,7 @@ async def buscar_rota_swap(
         return None
 
     # Converte amount_usd para unidades do token de entrada usando decimais reais.
-    decimais_from = _token_decimais(chain_id, addr_from)
-    amount_wei = int(amount_usd * (10 ** decimais_from))
+    amount_wei = _to_wei_amount(chain_id, token_from, amount_usd)
 
     params = {
         "src":              addr_from,
@@ -566,7 +593,7 @@ async def buscar_rota_swap_zerox(
     chain_id: int,
     token_from: str,
     token_to: str,
-    amount_usd: float,
+    amount_usd: float | int | str,
     wallet: str,
 ) -> dict | None:
     """Fallback de rota via 0x Allowance Holder Quote API."""
@@ -577,8 +604,7 @@ async def buscar_rota_swap_zerox(
     if not addr_from or not addr_to:
         return None
 
-    decimais_from = _token_decimais(chain_id, addr_from)
-    amount_wei = int(amount_usd * (10 ** decimais_from))
+    amount_wei = _to_wei_amount(chain_id, token_from, amount_usd)
 
     params = {
         "chainId": str(chain_id),
@@ -631,7 +657,7 @@ async def buscar_rota_swap_jumper(
     chain_id: int,
     token_from: str,
     token_to: str,
-    amount_usd: float,
+    amount_usd: float | int | str,
     wallet: str,
 ) -> dict | None:
     """Quote e tx via Jumper (Li.Fi)."""
@@ -641,8 +667,7 @@ async def buscar_rota_swap_jumper(
     if not addr_from or not addr_to:
         return None
 
-    decimais_from = _token_decimais(chain_id, addr_from)
-    amount_wei = int(amount_usd * (10 ** decimais_from))
+    amount_wei = _to_wei_amount(chain_id, token_from, amount_usd)
 
     params = {
         "fromChain": str(chain_id),
@@ -698,7 +723,7 @@ async def buscar_rota_swap_oku(
     chain_id: int,
     token_from: str,
     token_to: str,
-    amount_usd: float,
+    amount_usd: float | int | str,
     wallet: str,
 ) -> dict | None:
     """Quote e tx via Oku Trade (Canoe API)."""
@@ -758,7 +783,7 @@ async def buscar_rota_swap_llama(
     chain_id: int,
     token_from: str,
     token_to: str,
-    amount_usd: float,
+    amount_usd: float | int | str,
     wallet: str,
 ) -> dict | None:
     """Adapter configurável para LlamaSwap via endpoint definido em env."""
@@ -772,8 +797,7 @@ async def buscar_rota_swap_llama(
     if not addr_from or not addr_to:
         return None
 
-    decimais_from = _token_decimais(chain_id, addr_from)
-    amount_wei = int(amount_usd * (10 ** decimais_from))
+    amount_wei = _to_wei_amount(chain_id, token_from, amount_usd)
 
     payload = {
         "chainId": chain_id,
@@ -826,7 +850,7 @@ async def executar_swap(
     chain_id:   int,
     token_from: str,
     token_to:   str,
-    amount_usd: float,
+    amount_usd: float | int | str,
     wallet:     str,
     private_key: str,
 ) -> dict:
@@ -1101,11 +1125,13 @@ async def executar_swap(
         )
         recebido_wei = max(0, saldo_to_depois - saldo_to_antes)
         recebido_amount = 0.0
+        recebido_amount_str = "0"
         if recebido_wei > 0:
             token_to_addr = TOKENS.get(chain_id, {}).get(token_to)
             if token_to_addr:
                 dec_to = _token_decimais(chain_id, token_to_addr)
-                recebido_amount = recebido_wei / (10 ** dec_to)
+                recebido_amount_str = _base_units_to_amount_str(recebido_wei, dec_to)
+                recebido_amount = float(recebido_amount_str)
 
         sl_info = rota.get("slippage")
         if sl_info:
@@ -1124,6 +1150,7 @@ async def executar_swap(
             "approve_explorers": approve_explorers,
             "received_token_wei": recebido_wei,
             "received_token_amount": recebido_amount,
+            "received_token_amount_str": recebido_amount_str,
             "received_token_symbol": token_to,
         }
 

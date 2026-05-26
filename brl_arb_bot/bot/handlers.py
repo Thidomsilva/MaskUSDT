@@ -339,7 +339,9 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             close_cycle = os.getenv("CLOSE_CYCLE_ENABLED", "true").strip().lower() in {
                 "1", "true", "yes", "y", "on"
             }
-            if close_cycle and token_from in TOKENS_USD and token_to in TOKENS_BRL and received_amount > 0:
+            received_amount_exact = resultado.get("received_token_amount_str")
+            received_amount_wei = int(resultado.get("received_token_wei") or 0)
+            if close_cycle and token_from in TOKENS_USD and token_to in TOKENS_BRL and received_amount_wei > 0 and received_amount_exact:
                 await query.message.reply_text(
                     "🔁 Tentando fechar ciclo para realizar lucro em USD...",
                     parse_mode="Markdown",
@@ -348,7 +350,7 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     chain_id=chain_id,
                     token_from=token_to,
                     token_to=token_from,
-                    amount_usd=received_amount,
+                    amount_usd=received_amount_exact,
                     wallet=user["dex_address"],
                     private_key=user["dex_pk"],
                 )

@@ -288,8 +288,9 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                             and token_from in TOKENS_USD
                             and token_to in TOKENS_BRL
                         ):
-                            recebido = float(resultado.get("received_token_amount") or 0)
-                            if recebido > 0:
+                            recebido_wei = int(resultado.get("received_token_wei") or 0)
+                            recebido = resultado.get("received_token_amount_str")
+                            if recebido_wei > 0 and recebido:
                                 resultado_volta = await executar_swap(
                                     chain_id=melhor.chain_id,
                                     token_from=token_to,
