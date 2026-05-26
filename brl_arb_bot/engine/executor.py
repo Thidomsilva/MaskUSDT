@@ -526,7 +526,9 @@ async def executar_swap(
         signed = w3.eth.account.sign_transaction(tx, private_key)
 
         # 4. Envia para a rede
-        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        # Compatível com web3.py v5 (rawTransaction) e v6+ (raw_transaction)
+        raw_tx = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
+        tx_hash = w3.eth.send_raw_transaction(raw_tx)
         tx_hash_hex = tx_hash.hex()
 
         # Monta link do explorer
