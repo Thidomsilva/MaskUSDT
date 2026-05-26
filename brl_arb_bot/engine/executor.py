@@ -8,6 +8,10 @@ import os
 import re
 import aiohttp
 from web3 import Web3
+try:
+    from web3.middleware import geth_poa_middleware  # web3.py v6
+except Exception:  # pragma: no cover
+    geth_poa_middleware = None
 from config import TOKENS, NETWORKS
 
 logger = logging.getLogger(__name__)
@@ -402,6 +406,16 @@ def _simular_tx_call(w3: Web3, tx: dict) -> str | None:
     return None
 
 
+def _configurar_middleware_rede(w3: Web3, chain_id: int) -> None:
+    """Configura middleware necessário por rede (ex.: Polygon/POA)."""
+    if chain_id in {137} and geth_poa_middleware is not None:
+        try:
+            w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        except Exception:
+            # Ignora se já foi injetado ou se o provedor não permitir alteração.
+            pass
+
+
 def _rpc_web3(chain_id: int) -> Web3:
     """Tenta RPCs em ordem; retorna o primeiro conectado (fallback seguro)."""
     urls: list[str] = []
@@ -413,12 +427,15 @@ def _rpc_web3(chain_id: int) -> Web3:
     for url in urls:
         try:
             w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 8}))
+            _configurar_middleware_rede(w3, chain_id)
             if w3.is_connected():
                 return w3
         except Exception:
             continue
     # último recurso — retorna sem verificar; chamador vai receber erro explícito
-    return Web3(Web3.HTTPProvider(urls[0]))
+    w3 = Web3(Web3.HTTPProvider(urls[0]))
+    _configurar_middleware_rede(w3, chain_id)
+    return w3
 
 
 def _token_decimais(chain_id: int, token_address: str) -> int:
