@@ -5,6 +5,7 @@ handlers.py — Handlers do bot Telegram com botões inline Executar / Ignorar.
 import asyncio
 import json
 import logging
+import os
 import uuid
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.error import BadRequest
@@ -23,6 +24,9 @@ from engine.executor import executar_swap
 from engine.prices import buscar_saldo_polygon
 
 logger = logging.getLogger(__name__)
+
+# GIF exibido no /start — coloque a URL ou file_id do Telegram no .env
+MENU_GIF: str = os.getenv("MENU_GIF", "")
 
 WAIT_ADDRESS, WAIT_PK = range(2)
 
@@ -55,6 +59,26 @@ def _teclado_modo(modo_atual: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(manual, callback_data="mode|manual")],
         [InlineKeyboardButton(auto, callback_data="mode|auto")],
     ])
+
+
+async def _send_menu(
+    message,
+    caption: str,
+    reply_markup: InlineKeyboardMarkup,
+) -> None:
+    """Envia GIF animado com botões inline. Cai para texto puro se GIF não configurado ou inválido."""
+    if MENU_GIF:
+        try:
+            await message.reply_animation(
+                animation=MENU_GIF,
+                caption=caption,
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+            )
+            return
+        except Exception:
+            pass  # GIF inválido → fallback
+    await message.reply_text(caption, parse_mode="Markdown", reply_markup=reply_markup)
 
 
 def _nome_modo(modo: str) -> str:
@@ -318,33 +342,23 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception:
             saldo_txt = "_indisponível_"
 
-        await update.message.reply_text(
+        caption = (
             f"👋 *Bem-vindo de volta!*\n\n"
-            f"✅ Carteira: `{resumo}`\n"
-            f"📍 Polygon\n"
+            f"✅ `{resumo}`  📍 Polygon\n"
             f"{saldo_txt}\n\n"
-            f"⚙️ Modo: *{modo}*\n\n"
-            f"/iniciar — Liga o monitor\n"
-            f"/modo — Alterna manual/automático\n"
-            f"/painel — Menu completo\n"
-            f"/admin — Painel admin (se autorizado)\n"
-            f"/parar — Desliga\n"
-            f"/status — Estado atual",
-            parse_mode="Markdown",
-            reply_markup=_teclado_start_cadastrado(is_admin(uid)),
+            f"⚙️ Modo: *{modo}*"
         )
+        await _send_menu(update.message, caption, _teclado_start_cadastrado(is_admin(uid)))
     else:
-        await update.message.reply_text(
+        caption = (
             "🤖 *Bot de Arbitragem BRL Stablecoins*\n\n"
             "Monitora spreads entre BRZ, BRLA, BRL1 e USDT em tempo real.\n\n"
-            "📍 *Rede principal: Polygon*\n"
+            "📍 *Rede: Polygon*\n"
             "Para operar você precisará de:\n"
-            "  • *USDT* na Polygon (capital de trade)\n"
-            "  • *POL* na Polygon (para pagar o gas — mín. 5 POL)\n\n"
-            "Use o botão abaixo para iniciar o cadastro.",
-            parse_mode="Markdown",
-            reply_markup=_teclado_start_novo(),
+            "  • *USDT* — capital de trade\n"
+            "  • *POL* — gas (mín. 5 POL)"
         )
+        await _send_menu(update.message, caption, _teclado_start_novo())
 
 
 # ─── Cadastro ─────────────────────────────────────────────────────────────────
