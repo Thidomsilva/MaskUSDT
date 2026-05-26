@@ -1,4 +1,4 @@
-python-telegram-bot==21.3
+python-telegram-bot[job-queue]==22.7
 aiohttp==3.9.5
 web3==6.19.0
 cryptography==42.0.8

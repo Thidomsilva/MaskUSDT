@@ -173,16 +173,15 @@ async def _mostrar_lucros(query, uid: int):
 
 async def _mostrar_carteira(query, user: dict):
     addr = user["dex_address"]
-    redes_links = (
-        f"[Ethereum](https://etherscan.io/address/{addr}) | "
-        f"[Polygon](https://polygonscan.com/address/{addr}) | "
-        f"[Arbitrum](https://arbiscan.io/address/{addr}) | "
-        f"[Base](https://basescan.org/address/{addr})"
-    )
+    link_polygon = f"[Ver na Polygon](https://polygonscan.com/address/{addr})"
     await query.edit_message_text(
         f"⚙️ *Minha Carteira*\n\n"
         f"Endereço:\n`{addr}`\n\n"
-        f"Ver no explorer:\n{redes_links}",
+        f"📍 *Rede principal: Polygon*\n"
+        f"Saldo necessário para operar:\n"
+        f"  • *USDT* — capital de trade\n"
+        f"  • *POL* — mínimo 5 POL para gas\n\n"
+        f"{link_polygon}",
         parse_mode="Markdown",
         disable_web_page_preview=True,
         reply_markup=_botao_voltar()

@@ -20,6 +20,7 @@ from vault.vault import (
 )
 from engine.arbitrage import loop_usuario
 from engine.executor import executar_swap
+from engine.prices import buscar_saldo_polygon
 
 logger = logging.getLogger(__name__)
 
@@ -301,9 +302,27 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         addr   = user["dex_address"]
         resumo = f"{addr[:8]}...{addr[-4:]}"
         modo   = _nome_modo(_modo_usuario(user))
+
+        # Busca saldos na Polygon em background (sem travar o bot se RPC lento)
+        saldo_txt = "⏳ carregando..."
+        try:
+            saldos = await buscar_saldo_polygon(addr)
+            pol  = saldos.get("POL")
+            usdt = saldos.get("USDT")
+            usdc = saldos.get("USDC")
+            linhas = []
+            if pol  is not None: linhas.append(f"  • POL:  `{pol:.4f}`")
+            if usdt is not None: linhas.append(f"  • USDT: `{usdt:.2f}`")
+            if usdc is not None: linhas.append(f"  • USDC: `{usdc:.2f}`")
+            saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
+        except Exception:
+            saldo_txt = "_indisponível_"
+
         await update.message.reply_text(
             f"👋 *Bem-vindo de volta!*\n\n"
-            f"✅ Carteira: `{resumo}`\n\n"
+            f"✅ Carteira: `{resumo}`\n"
+            f"📍 Polygon\n"
+            f"{saldo_txt}\n\n"
             f"⚙️ Modo: *{modo}*\n\n"
             f"/iniciar — Liga o monitor\n"
             f"/modo — Alterna manual/automático\n"
@@ -316,9 +335,12 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text(
-            "🤖 *Bot de Arbitragem — BRZ / BRLA vs USDT/USDC*\n\n"
-            "Monitora spreads em tempo real:\n"
-            "Ethereum • Polygon • Arbitrum • Base\n\n"
+            "🤖 *Bot de Arbitragem BRL Stablecoins*\n\n"
+            "Monitora spreads entre BRZ, BRLA, BRL1 e USDT em tempo real.\n\n"
+            "📍 *Rede principal: Polygon*\n"
+            "Para operar você precisará de:\n"
+            "  • *USDT* na Polygon (capital de trade)\n"
+            "  • *POL* na Polygon (para pagar o gas — mín. 5 POL)\n\n"
             "Use o botão abaixo para iniciar o cadastro.",
             parse_mode="Markdown",
             reply_markup=_teclado_start_novo(),
@@ -332,6 +354,9 @@ async def cadastrar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "📌 *Passo 1/2 — Endereço da carteira*\n\n"
         "Crie uma carteira *dedicada exclusivamente ao bot*.\n"
         "⚠️ *Nunca use sua MetaMask principal.*\n\n"
+        "📍 Certifique-se de que essa carteira tenha:\n"
+        "  • *USDT* na rede *Polygon* (capital de operação)\n"
+        "  • *POL* na rede *Polygon* (mínimo 5 POL para gas)\n\n"
         "Cole o endereço público (0x...):",
         parse_mode="Markdown"
     )
@@ -346,6 +371,9 @@ async def cadastrar_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "📌 *Passo 1/2 — Endereço da carteira*\n\n"
         "Crie uma carteira *dedicada exclusivamente ao bot*.\n"
         "⚠️ *Nunca use sua MetaMask principal.*\n\n"
+        "📍 Certifique-se de que essa carteira tenha:\n"
+        "  • *USDT* na rede *Polygon* (capital de operação)\n"
+        "  • *POL* na rede *Polygon* (mínimo 5 POL para gas)\n\n"
         "Cole o endereço público (0x...):",
         parse_mode="Markdown"
     )
@@ -385,6 +413,9 @@ async def receber_pk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🎉 *Cadastro completo!*\n\n"
         "✅ Carteira registrada e criptografada.\n"
         "Você nunca mais precisará digitar suas credenciais.\n\n"
+        "📍 *Lembrete antes de iniciar:*\n"
+        "Garanta que sua carteira tenha *USDT + POL* na Polygon.\n"
+        "Sem saldo de POL o bot não consegue pagar o gas e as transações falharão.\n\n"
         "Escolha o próximo passo abaixo.",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([

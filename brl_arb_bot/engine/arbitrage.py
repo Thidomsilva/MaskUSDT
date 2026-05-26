@@ -93,6 +93,10 @@ async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list
             slippage_usd = amount_usd * SLIPPAGE_PCT / 100
             lucro_usd    = amount_usd * spread_pct / 100 - gas_usd - fee_swap_usd - slippage_usd
 
+            # Spread só existe quando o resultado líquido é positivo
+            if lucro_usd <= 0:
+                continue
+
             if lucro_usd < MIN_LUCRO_USD:
                 continue
 

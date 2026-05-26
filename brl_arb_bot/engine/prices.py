@@ -387,6 +387,61 @@ async def cotacao_usd_brl_atual() -> float:
         return await cotacao_usd_brl(session)
 
 
+ERC20_BALANCE_ABI = [{
+    "constant": True,
+    "inputs": [{"name": "_owner", "type": "address"}],
+    "name": "balanceOf",
+    "outputs": [{"name": "balance", "type": "uint256"}],
+    "payable": False,
+    "stateMutability": "view",
+    "type": "function",
+}]
+
+
+async def buscar_saldo_polygon(address: str) -> dict:
+    """
+    Retorna saldos da carteira na Polygon (rede principal).
+    Retorna: {"POL": float, "USDT": float, "USDC": float}
+    Falhas individuais retornam None para o token afetado.
+    """
+    import asyncio as _asyncio
+    rpc = NETWORKS[137]["rpc"]
+    tokens_polygon = TOKENS[137]
+    checksum_addr = Web3.to_checksum_address(address)
+
+    def _saldo_nativo():
+        try:
+            w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 6}))
+            raw = w3.eth.get_balance(checksum_addr)
+            return raw / 1e18
+        except Exception:
+            return None
+
+    def _saldo_erc20(symbol: str):
+        try:
+            token_addr = tokens_polygon.get(symbol)
+            if not token_addr:
+                return None
+            w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 6}))
+            contract = w3.eth.contract(
+                address=Web3.to_checksum_address(token_addr),
+                abi=ERC20_BALANCE_ABI,
+            )
+            decimals = _token_decimais(137, token_addr)
+            raw = contract.functions.balanceOf(checksum_addr).call()
+            return raw / (10 ** decimals)
+        except Exception:
+            return None
+
+    loop = _asyncio.get_event_loop()
+    pol, usdt, usdc = await _asyncio.gather(
+        loop.run_in_executor(None, _saldo_nativo),
+        loop.run_in_executor(None, _saldo_erc20, "USDT"),
+        loop.run_in_executor(None, _saldo_erc20, "USDC"),
+    )
+    return {"POL": pol, "USDT": usdt, "USDC": usdc}
+
+
 def _normalizar_preco(preco: float | None) -> float | None:
     """Descarta preços inválidos (ex.: -1 de APIs sem suporte)."""
     if preco is None:

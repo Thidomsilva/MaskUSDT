@@ -89,15 +89,10 @@ TOKENS = {
 #
 PARES_MONITORADOS = {
 
-    # Ethereum — só BRZ disponível
-    1: [
-        ("BRZ", "USDT"),
-        ("BRZ", "USDC"),
-    ],
-
-    # Polygon — hub principal, todos os tokens disponíveis
+    # ── FOCO ATUAL: Polygon ──────────────────────────────────────────────────
+    # Hub principal de liquidez BRL. Carteira precisa de: USDT + POL (gas).
     137: [
-        # BRL vs USD
+        # BRL vs USD  (pares com maior volume)
         ("BRZ",  "USDT"),
         ("BRZ",  "USDC"),
         ("BRLA", "USDT"),
@@ -110,16 +105,15 @@ PARES_MONITORADOS = {
         ("BRLA", "BRL1"),
     ],
 
-    # Arbitrum — só BRZ disponível
-    42161: [
-        ("BRZ", "USDT"),
-        ("BRZ", "USDC"),
-    ],
-
-    # Base — só BRLA disponível
-    8453: [
-        ("BRLA", "USDC"),
-    ],
+    # ── Outras redes (desativadas — ativar quando capital justificar) ────────
+    # Ethereum: gas muito alto, só vale com > $1000 de capital
+    # 1: [("BRZ", "USDT"), ("BRZ", "USDC")],
+    #
+    # Arbitrum: pouca liquidez BRL ainda
+    # 42161: [("BRZ", "USDT"), ("BRZ", "USDC")],
+    #
+    # Base: BRLA crescendo — ativar quando liquidez aumentar
+    # 8453: [("BRLA", "USDC")],
 }
 
 # ─── Thresholds ───────────────────────────────────────────────────────────────
