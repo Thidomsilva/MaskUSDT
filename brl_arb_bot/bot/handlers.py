@@ -5,7 +5,9 @@ handlers.py — Handlers do bot Telegram com botões inline Executar / Ignorar.
 import asyncio
 import json
 import logging
+import uuid
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telegram.error import BadRequest
 from telegram.ext import (
     ContextTypes, ConversationHandler,
     CommandHandler, MessageHandler,
@@ -38,7 +40,7 @@ def _teclado_start_cadastrado() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("▶ Iniciar monitor", callback_data="start|iniciar")],
         [InlineKeyboardButton("⚙️ Modo Manual/Auto", callback_data="start|modo")],
-        [InlineKeyboardButton("📱 Abrir painel", switch_inline_query_current_chat="/painel")],
+        [InlineKeyboardButton("📱 Abrir painel", callback_data="start|painel")],
     ])
 
 
@@ -73,9 +75,25 @@ def _resolver_tokens_execucao(oport) -> tuple[str, str]:
     return oport.token_brl, oport.token_usd
 
 
+def _store_exec_payload(bot_data: dict, uid: int, payload: dict) -> str:
+    """Guarda payload de execucao e retorna id curto para callback_data."""
+    pending_all = bot_data.setdefault("pending_exec", {})
+    pending_user = pending_all.setdefault(str(uid), {})
+
+    payload_id = uuid.uuid4().hex[:12]
+    pending_user[payload_id] = payload
+
+    # Mantem janela pequena para evitar crescimento infinito.
+    while len(pending_user) > 100:
+        oldest_key = next(iter(pending_user))
+        pending_user.pop(oldest_key, None)
+
+    return payload_id
+
+
 # ─── Alerta com botões inline ─────────────────────────────────────────────────
 
-def montar_alerta(oport) -> tuple[str, InlineKeyboardMarkup]:
+def montar_alerta(oport, bot_data: dict | None = None, uid: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
     from config import NETWORKS
     rede = NETWORKS[oport.chain_id]["name"]
 
@@ -93,16 +111,24 @@ def montar_alerta(oport) -> tuple[str, InlineKeyboardMarkup]:
         f"🔴 Gas est.: `-${oport.gas_usd:.4f}`\n"
         f"🟡 *Lucro líquido est.: `${oport.lucro_usd:.4f}`*"
     )
-    payload = json.dumps({
+    payload = {
         "c":  oport.chain_id,
         "fb": token_from,
         "tu": token_to,
         "am": oport.amount_usd,
         "sp": round(oport.spread_pct, 3),
         "lu": round(oport.lucro_usd, 4),
-    })
+    }
+
+    if bot_data is not None and uid is not None:
+        payload_ref = _store_exec_payload(bot_data, uid, payload)
+        callback_exec = f"exec|{payload_ref}"
+    else:
+        # Fallback de compatibilidade (evitar uso em producao por limite de 64 bytes).
+        callback_exec = f"exec|{json.dumps(payload, separators=(',', ':'))}"
+
     teclado = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Executar agora", callback_data=f"exec|{payload}"),
+        InlineKeyboardButton("✅ Executar agora", callback_data=callback_exec),
         InlineKeyboardButton("❌ Ignorar",        callback_data="ignore"),
     ]])
     return texto, teclado
@@ -139,6 +165,19 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "start|painel":
+        user = get_user(uid)
+        if not user:
+            await query.answer("Use /cadastrar primeiro.", show_alert=True)
+            return
+        from bot.dashboard import _menu_aluno
+        await query.message.reply_text(
+            "📱 *Meu Painel*\n\nEscolha o que deseja ver:",
+            parse_mode="Markdown",
+            reply_markup=_menu_aluno(),
+        )
+        return
+
     if data.startswith("mode|"):
         novo_modo = data.split("|", 1)[1]
         try:
@@ -148,15 +187,33 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         user = get_user(uid)
         modo = _modo_usuario(user)
-        await query.edit_message_text(
-            _texto_modo(modo),
-            parse_mode="Markdown",
-            reply_markup=_teclado_modo(modo),
-        )
+        try:
+            await query.edit_message_text(
+                _texto_modo(modo),
+                parse_mode="Markdown",
+                reply_markup=_teclado_modo(modo),
+            )
+        except BadRequest as exc:
+            # Telegram retorna erro quando o usuário toca no mesmo modo já selecionado.
+            if "Message is not modified" not in str(exc):
+                raise
         return
 
     if data.startswith("exec|"):
-        payload    = json.loads(data.split("|", 1)[1])
+        raw_payload = data.split("|", 1)[1]
+
+        if raw_payload.startswith("{"):
+            payload = json.loads(raw_payload)
+        else:
+            pending_all = ctx.bot_data.get("pending_exec", {})
+            pending_user = pending_all.get(str(uid), {})
+            payload = pending_user.pop(raw_payload, None)
+            if not payload:
+                await query.edit_message_text(
+                    "⚠️ Este alerta expirou. Aguarde o próximo sinal.",
+                )
+                return
+
         user       = get_user(uid)
         if not user:
             await query.edit_message_text("❌ Usuário não encontrado. Use /cadastrar.")
@@ -447,5 +504,5 @@ def registrar_todos_handlers(app):
     app.add_handler(CommandHandler("historico", historico))
     app.add_handler(CallbackQueryHandler(
         callback_botao,
-        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|mode\|)"
+        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|painel$|mode\|)"
     ))

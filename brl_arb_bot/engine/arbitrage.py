@@ -196,7 +196,7 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                     else:
                         logger.info(f"[uid={telegram_id}] Cooldown ativo do auto-trade.")
                 else:
-                    texto, teclado = montar_alerta(melhor)
+                    texto, teclado = montar_alerta(melhor, bot_data=bot_data, uid=telegram_id)
                     await bot.send_message(
                         chat_id=telegram_id,
                         text=texto,
