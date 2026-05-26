@@ -23,6 +23,15 @@ CHAIN_SLUG = {
     8453: "base",
 }
 
+
+def _erro_dex(msg: str) -> dict:
+    return {"erro": msg}
+
+
+def _resumir_erro_http(texto: str, limite: int = 140) -> str:
+    t = " ".join((texto or "").split())
+    return t[:limite] + ("..." if len(t) > limite else "")
+
 ERC20_DECIMALS_ABI = [{
     "constant": True,
     "inputs": [],
@@ -131,12 +140,12 @@ async def buscar_rota_swap(
                 if r.status != 200:
                     erro = await r.text()
                     logger.error(f"1inch swap erro {r.status}: {erro}")
-                    return None
+                    return _erro_dex(f"http {r.status}: {_resumir_erro_http(erro)}")
                 data = await r.json()
                 return data
     except Exception as e:
         logger.error(f"Erro ao buscar rota 1inch: {e}")
-        return None
+        return _erro_dex(str(e))
 
 
 async def buscar_rota_swap_zerox(
@@ -176,7 +185,7 @@ async def buscar_rota_swap_zerox(
                 if r.status != 200:
                     erro = await r.text()
                     logger.error(f"0x quote erro {r.status}: {erro}")
-                    return None
+                    return _erro_dex(f"http {r.status}: {_resumir_erro_http(erro)}")
 
                 data = await r.json()
                 tx_raw = data.get("transaction")
@@ -200,7 +209,7 @@ async def buscar_rota_swap_zerox(
                 return {"tx": tx, "fonte": "0x"}
     except Exception as e:
         logger.error(f"Erro ao buscar rota 0x: {e}")
-        return None
+        return _erro_dex(str(e))
 
 
 async def buscar_rota_swap_jumper(
@@ -242,7 +251,7 @@ async def buscar_rota_swap_jumper(
                 if r.status != 200:
                     erro = await r.text()
                     logger.error(f"Jumper quote erro {r.status}: {erro}")
-                    return None
+                    return _erro_dex(f"http {r.status}: {_resumir_erro_http(erro)}")
 
                 data = await r.json()
                 tx_raw = data.get("transactionRequest")
@@ -265,7 +274,7 @@ async def buscar_rota_swap_jumper(
                 return {"tx": tx, "fonte": "jumper", "raw": data}
     except Exception as e:
         logger.error(f"Erro ao buscar rota Jumper: {e}")
-        return None
+        return _erro_dex(str(e))
 
 
 async def buscar_rota_swap_oku(
@@ -307,7 +316,7 @@ async def buscar_rota_swap_oku(
                 if r.status != 200:
                     erro = await r.text()
                     logger.error(f"Oku quote erro {r.status}: {erro}")
-                    return None
+                    return _erro_dex(f"http {r.status}: {_resumir_erro_http(erro)}")
 
                 data = await r.json()
                 tx_raw = data.get("executionInfo", {}).get("trade") or {}
@@ -323,7 +332,7 @@ async def buscar_rota_swap_oku(
                 return {"tx": tx, "fonte": "oku", "raw": data}
     except Exception as e:
         logger.error(f"Erro ao buscar rota Oku: {e}")
-        return None
+        return _erro_dex(str(e))
 
 
 async def buscar_rota_swap_llama(
@@ -367,7 +376,7 @@ async def buscar_rota_swap_llama(
                 if r.status != 200:
                     erro = await r.text()
                     logger.error(f"LlamaSwap quote erro {r.status}: {erro}")
-                    return None
+                    return _erro_dex(f"http {r.status}: {_resumir_erro_http(erro)}")
 
                 data = await r.json()
                 tx_raw = data.get("tx") or data.get("transactionRequest") or data.get("transaction")
@@ -390,7 +399,7 @@ async def buscar_rota_swap_llama(
                 return {"tx": tx, "fonte": "llama", "raw": data}
     except Exception as e:
         logger.error(f"Erro ao buscar rota LlamaSwap: {e}")
-        return None
+        return _erro_dex(str(e))
 
 
 async def executar_swap(
@@ -415,6 +424,7 @@ async def executar_swap(
     # 1. Busca rota em múltiplas DEXs configuradas
     rota = None
     fonte = None
+    diagnostico = []
 
     for dex in _dex_priority():
         if dex == "1inch":
@@ -432,8 +442,17 @@ async def executar_swap(
             fonte = rota.get("fonte", dex)
             break
 
-    if not rota:
-        return {"sucesso": False, "erro": "Não foi possível obter rota de swap nas DEXs configuradas."}
+        if rota and rota.get("erro"):
+            diagnostico.append(f"{dex}: {rota['erro']}")
+        else:
+            diagnostico.append(f"{dex}: sem rota")
+
+    if not rota or not rota.get("tx"):
+        detalhe = " | ".join(diagnostico[:4]) if diagnostico else "sem detalhes"
+        return {
+            "sucesso": False,
+            "erro": f"Não foi possível obter rota nas DEXs configuradas. Diagnóstico: {detalhe}",
+        }
 
     tx_data = rota.get("tx")
     if not tx_data:

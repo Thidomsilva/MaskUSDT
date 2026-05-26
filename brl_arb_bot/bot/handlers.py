@@ -16,7 +16,7 @@ from telegram.ext import (
 from vault.vault import (
     save_user, get_user,
     user_exists, historico_usuario, registrar_operacao,
-    set_user_trading_mode,
+    set_user_trading_mode, is_admin,
 )
 from engine.arbitrage import loop_usuario
 from engine.executor import executar_swap
@@ -36,12 +36,15 @@ def _teclado_start_novo() -> InlineKeyboardMarkup:
     ])
 
 
-def _teclado_start_cadastrado() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+def _teclado_start_cadastrado(admin_user: bool = False) -> InlineKeyboardMarkup:
+    linhas = [
         [InlineKeyboardButton("▶ Iniciar monitor", callback_data="start|iniciar")],
         [InlineKeyboardButton("⚙️ Modo Manual/Auto", callback_data="start|modo")],
         [InlineKeyboardButton("📱 Abrir painel", callback_data="start|painel")],
-    ])
+    ]
+    if admin_user:
+        linhas.append([InlineKeyboardButton("🛡️ Painel admin", callback_data="start|admin")])
+    return InlineKeyboardMarkup(linhas)
 
 
 def _teclado_modo(modo_atual: str) -> InlineKeyboardMarkup:
@@ -183,6 +186,18 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "start|admin":
+        if not is_admin(uid):
+            await query.answer("⛔ Acesso restrito.", show_alert=True)
+            return
+        from bot.admin import _menu_admin
+        await query.message.reply_text(
+            "🟠 *ADMIN*\n🛡️ *Painel Administrativo*\n\nAcesso restrito ao administrador.\nO que deseja ver?",
+            parse_mode="Markdown",
+            reply_markup=_menu_admin(),
+        )
+        return
+
     if data.startswith("mode|"):
         novo_modo = data.split("|", 1)[1]
         try:
@@ -288,10 +303,11 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"/iniciar — Liga o monitor\n"
             f"/modo — Alterna manual/automático\n"
             f"/painel — Menu completo\n"
+            f"/admin — Painel admin (se autorizado)\n"
             f"/parar — Desliga\n"
             f"/status — Estado atual",
             parse_mode="Markdown",
-            reply_markup=_teclado_start_cadastrado(),
+            reply_markup=_teclado_start_cadastrado(is_admin(uid)),
         )
     else:
         await update.message.reply_text(
@@ -509,5 +525,5 @@ def registrar_todos_handlers(app):
     app.add_handler(CommandHandler("historico", historico))
     app.add_handler(CallbackQueryHandler(
         callback_botao,
-        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|painel$|mode\|)"
+        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|painel$|start\|admin$|mode\|)"
     ))
