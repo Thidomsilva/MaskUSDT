@@ -7,7 +7,13 @@ import json
 import logging
 import os
 import uuid
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 from telegram.error import BadRequest
 from telegram.ext import (
     ContextTypes, ConversationHandler,
@@ -29,6 +35,21 @@ logger = logging.getLogger(__name__)
 MENU_GIF: str = os.getenv("MENU_GIF", "")
 
 WAIT_ADDRESS, WAIT_PK = range(2)
+MENU_HAMBURGER = "☰ Menu"
+
+
+def _teclado_hamburger() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [MENU_HAMBURGER],
+            ["▶ Iniciar", "⏹ Parar"],
+            ["📊 Status", "📋 Histórico"],
+            ["⚙️ Modo", "📱 Painel"],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        selective=True,
+    )
 
 
 def _modo_usuario(user: dict | None) -> str:
@@ -376,6 +397,10 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"⚙️ Modo: *{modo}*"
         )
         await _send_menu(update.message, caption, _teclado_start_cadastrado(is_admin(uid)))
+        await update.message.reply_text(
+            "Use o botão ☰ Menu para atalhos rápidos.",
+            reply_markup=_teclado_hamburger(),
+        )
     else:
         caption = (
             "🤖 *Bot de Arbitragem BRL Stablecoins*\n\n"
@@ -386,6 +411,10 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "  • *POL* — gas (mín. 5 POL)"
         )
         await _send_menu(update.message, caption, _teclado_start_novo())
+        await update.message.reply_text(
+            "Use o botão ☰ Menu para navegar com botões.",
+            reply_markup=_teclado_hamburger(),
+        )
 
 
 # ─── Cadastro ─────────────────────────────────────────────────────────────────
@@ -463,6 +492,10 @@ async def receber_pk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("▶ Iniciar monitor", callback_data="start|iniciar")],
             [InlineKeyboardButton("⚙️ Definir modo", callback_data="start|modo")],
         ]),
+    )
+    await update.message.reply_text(
+        "Ative o menu rápido para facilitar o uso:",
+        reply_markup=_teclado_hamburger(),
     )
     return ConversationHandler.END
 
@@ -574,9 +607,53 @@ async def ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/parar — Pausar monitor\n"
         "/status — Estado atual\n"
         "/historico — Últimas 10 operações\n"
+        "/menu — Mostrar teclado de atalhos\n"
         "/help — Esta mensagem",
         parse_mode="Markdown"
     )
+
+
+async def menu_hamburger(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user = get_user(uid)
+    if user:
+        await update.message.reply_text(
+            "☰ *Menu rápido*\nEscolha uma opção pelos botões abaixo.",
+            parse_mode="Markdown",
+            reply_markup=_teclado_hamburger(),
+        )
+    else:
+        await update.message.reply_text(
+            "☰ Menu disponível. Primeiro finalize seu cadastro em /cadastrar.",
+            reply_markup=_teclado_hamburger(),
+        )
+
+
+async def atalhos_hamburger(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    texto = (update.message.text or "").strip()
+
+    if texto == MENU_HAMBURGER:
+        await menu_hamburger(update, ctx)
+        return
+    if texto == "▶ Iniciar":
+        await iniciar_bot(update, ctx)
+        return
+    if texto == "⏹ Parar":
+        await parar_bot(update, ctx)
+        return
+    if texto == "📊 Status":
+        await status(update, ctx)
+        return
+    if texto == "📋 Histórico":
+        await historico(update, ctx)
+        return
+    if texto == "⚙️ Modo":
+        await modo(update, ctx)
+        return
+    if texto == "📱 Painel":
+        from bot.dashboard import menu_dashboard
+        await menu_dashboard(update, ctx)
+        return
 
 
 # ─── Registra handlers ────────────────────────────────────────────────────────
@@ -598,12 +675,17 @@ def get_conversation_handler():
 def registrar_todos_handlers(app):
     app.add_handler(get_conversation_handler())
     app.add_handler(CommandHandler("start",     start))
+    app.add_handler(CommandHandler("menu",      menu_hamburger))
     app.add_handler(CommandHandler("help",      ajuda))
     app.add_handler(CommandHandler("status",    status))
     app.add_handler(CommandHandler("modo",      modo))
     app.add_handler(CommandHandler("iniciar",   iniciar_bot))
     app.add_handler(CommandHandler("parar",     parar_bot))
     app.add_handler(CommandHandler("historico", historico))
+    app.add_handler(MessageHandler(
+        filters.Regex(r"^(☰ Menu|▶ Iniciar|⏹ Parar|📊 Status|📋 Histórico|⚙️ Modo|📱 Painel)$"),
+        atalhos_hamburger,
+    ))
     app.add_handler(CallbackQueryHandler(
         callback_botao,
         pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|painel$|start\|admin$|mode\|)"
