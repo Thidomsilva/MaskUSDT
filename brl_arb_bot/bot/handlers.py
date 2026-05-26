@@ -301,6 +301,11 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             tx_hash  = resultado["tx_hash"]
             explorer = resultado["explorer"]
             fonte    = resultado.get("fonte") or "dex"
+            approves = resultado.get("approve_explorers") or []
+            approve_txt = ""
+            if approves:
+                linhas = [f"• [Approve {i + 1}]({url})" for i, url in enumerate(approves[:3])]
+                approve_txt = "\n\n✅ *Approve automático detectado*\n" + "\n".join(linhas)
             registrar_operacao(uid, rede_nome, par, spread_pct, lucro_est, tx_hash, "sucesso")
             await query.edit_message_text(
                 f"✅ *Swap executado!*\n\n"
@@ -308,7 +313,8 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"Par: `{par}`\n"
                 f"Lucro est.: `${lucro_est:.4f}`\n\n"
                 f"Via: `{fonte}`\n"
-                f"🔗 [Ver no explorer]({explorer})",
+                f"🔗 [Ver no explorer]({explorer})"
+                f"{approve_txt}",
                 parse_mode="Markdown",
                 disable_web_page_preview=True
             )
@@ -316,11 +322,16 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             registrar_operacao(uid, rede_nome, par, spread_pct, 0, "", "erro")
             tx_hash = resultado.get("tx_hash")
             explorer = resultado.get("explorer")
+            approves = resultado.get("approve_explorers") or []
             detalhe_tx = ""
             if tx_hash and explorer:
                 detalhe_tx = f"\n\n🔗 [Ver transação]({explorer})"
+            detalhe_approve = ""
+            if approves:
+                linhas = [f"• [Approve {i + 1}]({url})" for i, url in enumerate(approves[:3])]
+                detalhe_approve = "\n\nℹ️ *Approve automático enviado*\n" + "\n".join(linhas)
             await query.edit_message_text(
-                f"❌ *Erro ao executar swap*\n\n`{resultado['erro']}`{detalhe_tx}",
+                f"❌ *Erro ao executar swap*\n\n`{resultado['erro']}`{detalhe_tx}{detalhe_approve}",
                 parse_mode="Markdown"
             )
 

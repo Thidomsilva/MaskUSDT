@@ -34,6 +34,16 @@ CHAIN_SLUG = {
 }
 
 
+def _explorer_tx_url(chain_id: int, tx_hash_hex: str) -> str:
+    base = {
+        1: "https://etherscan.io/tx/",
+        137: "https://polygonscan.com/tx/",
+        42161: "https://arbiscan.io/tx/",
+        8453: "https://basescan.org/tx/",
+    }.get(chain_id)
+    return f"{base}{tx_hash_hex}" if base else tx_hash_hex
+
+
 def _erro_dex(msg: str) -> dict:
     return {"erro": msg}
 
@@ -302,13 +312,13 @@ def _auto_approve_erc20(
     token_from: str,
     spender: str | None,
     amount_wei: int,
-) -> tuple[bool, str | None]:
+) -> tuple[bool, str | None, list[str]]:
     """Faz approve automático quando allowance está abaixo do necessário."""
     token_addr = TOKENS.get(chain_id, {}).get(token_from)
     if not token_addr:
-        return False, f"Token {token_from} não mapeado na rede {chain_id}."
+        return False, f"Token {token_from} não mapeado na rede {chain_id}.", []
     if not spender:
-        return False, "Contrato spender não informado para approve."
+        return False, "Contrato spender não informado para approve.", []
 
     try:
         owner = Web3.to_checksum_address(wallet)
@@ -334,6 +344,7 @@ def _auto_approve_erc20(
             gas_mult = 1.0
 
         receipt_timeout = int(_parse_float_env("SWAP_RECEIPT_TIMEOUT_SEC", 120))
+        approve_explorers: list[str] = []
 
         for novo_valor in passos:
             tx = token.functions.approve(spender_addr, int(novo_valor)).build_transaction({
@@ -365,13 +376,14 @@ def _auto_approve_erc20(
                 timeout=receipt_timeout,
                 poll_latency=2,
             )
+            approve_explorers.append(_explorer_tx_url(chain_id, tx_hash.hex()))
             if int(receipt.get("status", 0)) != 1:
                 h = tx_hash.hex()
-                return False, f"Approve falhou on-chain (status=0): {h}"
+                return False, f"Approve falhou on-chain (status=0): {h}", approve_explorers
 
-        return True, None
+        return True, None, approve_explorers
     except Exception as exc:
-        return False, f"Falha no approve automático: {exc}"
+        return False, f"Falha no approve automático: {exc}", []
 
 
 def _simular_tx_call(w3: Web3, tx: dict) -> str | None:
@@ -818,6 +830,7 @@ async def executar_swap(
 
     try:
         account = w3.eth.account.from_key(private_key)
+        approve_explorers: list[str] = []
 
         # Monta a transação com nonce e gas atuais
         tx = {
@@ -843,7 +856,7 @@ async def executar_swap(
             }
             allowance_baixa = "Allowance insuficiente" in erro_pretrade
             if auto_approve and allowance_baixa:
-                ok, erro_approve = _auto_approve_erc20(
+                ok, erro_approve, approve_explorers = _auto_approve_erc20(
                     w3=w3,
                     chain_id=chain_id,
                     private_key=private_key,
@@ -856,6 +869,7 @@ async def executar_swap(
                     return {
                         "sucesso": False,
                         "erro": f"{erro_pretrade} | {erro_approve}",
+                        "approve_explorers": approve_explorers,
                     }
 
                 allowance_pos = _allowance_atual(
@@ -872,6 +886,7 @@ async def executar_swap(
                             "Approve automático não elevou allowance ao mínimo necessário. "
                             f"allowance={allowance_pos}, necessário={amount_wei}."
                         ),
+                        "approve_explorers": approve_explorers,
                     }
             else:
                 return {"sucesso": False, "erro": erro_pretrade}
@@ -904,13 +919,18 @@ async def executar_swap(
 
         erro_saldo = _checar_saldo_gas(w3, account.address, tx)
         if erro_saldo:
-            return {"sucesso": False, "erro": erro_saldo}
+            return {
+                "sucesso": False,
+                "erro": erro_saldo,
+                "approve_explorers": approve_explorers,
+            }
 
         revert = _simular_tx_call(w3, tx)
         if revert:
             return {
                 "sucesso": False,
                 "erro": f"Simulação on-chain falhou antes do envio: {revert}",
+                "approve_explorers": approve_explorers,
             }
 
         # 3. Assina localmente
@@ -936,16 +956,9 @@ async def executar_swap(
                     "Ajuste slippage/valor e tente novamente."
                 ),
                 "tx_hash": tx_hash_hex,
-                "explorer": f"https://polygonscan.com/tx/{tx_hash_hex}" if chain_id == 137 else tx_hash_hex,
+                "explorer": _explorer_tx_url(chain_id, tx_hash_hex),
+                "approve_explorers": approve_explorers,
             }
-
-        # Monta link do explorer
-        explorers = {
-            1:     f"https://etherscan.io/tx/{tx_hash_hex}",
-            137:   f"https://polygonscan.com/tx/{tx_hash_hex}",
-            42161: f"https://arbiscan.io/tx/{tx_hash_hex}",
-            8453:  f"https://basescan.org/tx/{tx_hash_hex}",
-        }
 
         sl_info = rota.get("slippage")
         if sl_info:
@@ -959,8 +972,9 @@ async def executar_swap(
         return {
             "sucesso":  True,
             "tx_hash":  tx_hash_hex,
-            "explorer": explorers.get(chain_id, tx_hash_hex),
+            "explorer": _explorer_tx_url(chain_id, tx_hash_hex),
             "fonte": fonte,
+            "approve_explorers": approve_explorers,
         }
 
     except Exception as e:
