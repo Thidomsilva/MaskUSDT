@@ -669,6 +669,7 @@ def get_conversation_handler():
             WAIT_PK:      [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_pk)],
         },
         fallbacks=[CommandHandler("cancelar", cancelar)],
+        allow_reentry=True,
     )
 
 
