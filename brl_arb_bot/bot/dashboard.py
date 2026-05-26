@@ -172,20 +172,47 @@ async def _mostrar_lucros(query, uid: int):
 
 
 async def _mostrar_carteira(query, user: dict):
+    from engine.prices import buscar_saldo_polygon
     addr = user["dex_address"]
     link_polygon = f"[Ver na Polygon](https://polygonscan.com/address/{addr})"
+
+    # Mostra "consultando" enquanto busca on-chain
     await query.edit_message_text(
         f"⚙️ *Minha Carteira*\n\n"
         f"Endereço:\n`{addr}`\n\n"
-        f"📍 *Rede principal: Polygon*\n"
-        f"Saldo necessário para operar:\n"
-        f"  • *USDT* — capital de trade\n"
-        f"  • *POL* — mínimo 5 POL para gas\n\n"
+        f"📍 *Polygon — Saldo:* ⏳ consultando rede...\n\n"
         f"{link_polygon}",
         parse_mode="Markdown",
         disable_web_page_preview=True,
-        reply_markup=_botao_voltar()
+        reply_markup=_botao_voltar(),
     )
+
+    saldo_txt = "_indisponível_"
+    try:
+        saldos = await buscar_saldo_polygon(addr)
+        linhas = []
+        if saldos.get("POL")  is not None: linhas.append(f"  • POL:  `{saldos['POL']:.4f}`")
+        if saldos.get("USDT") is not None: linhas.append(f"  • USDT: `{saldos['USDT']:.2f}`")
+        if saldos.get("USDC") is not None: linhas.append(f"  • USDC: `{saldos['USDC']:.2f}`")
+        saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
+    except Exception:
+        pass
+
+    try:
+        await query.edit_message_text(
+            f"⚙️ *Minha Carteira*\n\n"
+            f"Endereço:\n`{addr}`\n\n"
+            f"📍 *Polygon — Saldo atual:*\n{saldo_txt}\n\n"
+            f"ℹ️ Para operar:\n"
+            f"  • *USDT* — capital de trade\n"
+            f"  • *POL* — mínimo 5 POL para gas\n\n"
+            f"{link_polygon}",
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
+            reply_markup=_botao_voltar(),
+        )
+    except Exception:
+        pass
 
 
 # ─── Registra handlers ────────────────────────────────────────────────────────

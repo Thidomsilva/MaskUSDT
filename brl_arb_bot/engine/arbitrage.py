@@ -47,6 +47,13 @@ GAS_ESTIMADO = {1: 150_000, 137: 80_000, 42161: 900_000, 8453: 80_000}
 GWEI_MEDIO   = {1: 20,      137: 50,     42161: 0.1,     8453: 0.005}
 FEE_POOL     = {1: 0.01,    137: 0.01,   42161: 0.01,    8453: 0.01}
 
+# ─── Sanidade de preços ────────────────────────────────────────────────────────
+# Preço de tokens BRL em USD: BRL/USD razoável entre 2.2 e 12 → 0.083 a 0.45
+BRL_PRECO_MIN_USD = 0.07
+BRL_PRECO_MAX_USD = 0.55
+# Spread máximo real para BRL/USD. Acima = erro de API, não oportunidade.
+MAX_SPREAD_BRL_USD_PCT = 6.0
+
 
 def estimar_gas_usd(chain_id: int) -> float:
     gas   = GAS_ESTIMADO.get(chain_id, 100_000)
@@ -77,7 +84,20 @@ async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list
 
             # Para BRL/USD: medir desvio da paridade cambial (evita falso 80%+ constante).
             if token_brl in TOKENS_BRL and token_usd in TOKENS_USD:
+                # Rejeita preços de API fora do range BRL/USD plausível (0.07–0.55 USD)
+                if not (BRL_PRECO_MIN_USD <= preco_brl <= BRL_PRECO_MAX_USD):
+                    logger.debug(
+                        f"[{token_brl}] preço {preco_brl:.6f} USD fora do range plausível "
+                        f"[{BRL_PRECO_MIN_USD}, {BRL_PRECO_MAX_USD}] — ignorado"
+                    )
+                    continue
                 spread_pct = abs(preco_brl - preco_brl_teorico_usd) / preco_brl_teorico_usd * 100
+                if spread_pct > MAX_SPREAD_BRL_USD_PCT:
+                    logger.debug(
+                        f"[{token_brl}/{token_usd}] spread {spread_pct:.2f}% "
+                        f"> cap {MAX_SPREAD_BRL_USD_PCT}% — descartado (possível erro de API)"
+                    )
+                    continue
             # Para BRL/BRL: comparar emissor vs emissor (paridade ideal 1:1).
             elif token_brl in TOKENS_BRL and token_usd in TOKENS_BRL:
                 denom = max(preco_brl, preco_usd)

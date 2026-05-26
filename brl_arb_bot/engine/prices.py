@@ -403,35 +403,48 @@ async def buscar_saldo_polygon(address: str) -> dict:
     Retorna saldos da carteira na Polygon (rede principal).
     Retorna: {"POL": float, "USDT": float, "USDC": float}
     Falhas individuais retornam None para o token afetado.
+    Tenta múltiplos RPCs em fallback para maior resiliência.
     """
     import asyncio as _asyncio
-    rpc = NETWORKS[137]["rpc"]
+
+    RPCS = [
+        "https://polygon-rpc.com",
+        "https://rpc.ankr.com/polygon",
+        "https://rpc-mainnet.matic.network",
+    ]
     tokens_polygon = TOKENS[137]
     checksum_addr = Web3.to_checksum_address(address)
 
+    def _w3(rpc: str):
+        return Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 8}))
+
     def _saldo_nativo():
-        try:
-            w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 6}))
-            raw = w3.eth.get_balance(checksum_addr)
-            return raw / 1e18
-        except Exception:
-            return None
+        for rpc in RPCS:
+            try:
+                w3 = _w3(rpc)
+                raw = w3.eth.get_balance(checksum_addr)
+                return raw / 1e18
+            except Exception:
+                continue
+        return None
 
     def _saldo_erc20(symbol: str):
-        try:
-            token_addr = tokens_polygon.get(symbol)
-            if not token_addr:
-                return None
-            w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 6}))
-            contract = w3.eth.contract(
-                address=Web3.to_checksum_address(token_addr),
-                abi=ERC20_BALANCE_ABI,
-            )
-            decimals = _token_decimais(137, token_addr)
-            raw = contract.functions.balanceOf(checksum_addr).call()
-            return raw / (10 ** decimals)
-        except Exception:
+        token_addr = tokens_polygon.get(symbol)
+        if not token_addr:
             return None
+        for rpc in RPCS:
+            try:
+                w3 = _w3(rpc)
+                contract = w3.eth.contract(
+                    address=Web3.to_checksum_address(token_addr),
+                    abi=ERC20_BALANCE_ABI,
+                )
+                decimals = _token_decimais(137, token_addr)
+                raw = contract.functions.balanceOf(checksum_addr).call()
+                return raw / (10 ** decimals)
+            except Exception:
+                continue
+        return None
 
     loop = _asyncio.get_event_loop()
     pol, usdt, usdc = await _asyncio.gather(
