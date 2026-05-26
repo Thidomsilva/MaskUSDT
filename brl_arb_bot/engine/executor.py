@@ -41,6 +41,30 @@ def _resumir_erro_http(texto: str, limite: int = 140) -> str:
     t = " ".join((texto or "").split())
     return t[:limite] + ("..." if len(t) > limite else "")
 
+
+def _parse_int_value(valor, default: int = 0) -> int:
+    """Converte números vindos de APIs que podem usar decimal ou hex."""
+    if valor is None:
+        return default
+    if isinstance(valor, bool):
+        return int(valor)
+    if isinstance(valor, int):
+        return valor
+    if isinstance(valor, float):
+        return int(valor)
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if not texto:
+            return default
+        try:
+            return int(texto, 0)
+        except ValueError:
+            try:
+                return int(float(texto))
+            except ValueError:
+                return default
+    return default
+
 ERC20_DECIMALS_ABI = [{
     "constant": True,
     "inputs": [],
@@ -495,12 +519,12 @@ async def executar_swap(
             "from":     account.address,
             "to":       Web3.to_checksum_address(tx_data["to"]),
             "data":     tx_data["data"],
-            "value":    int(tx_data.get("value", 0)),
+            "value":    _parse_int_value(tx_data.get("value", 0)),
             "nonce":    w3.eth.get_transaction_count(account.address),
             "chainId":  chain_id,
         }
 
-        gas_limite = int(tx_data.get("gas", 0) or 0)
+        gas_limite = _parse_int_value(tx_data.get("gas", 0))
         if gas_limite <= 0:
             try:
                 gas_limite = int(w3.eth.estimate_gas({
@@ -515,10 +539,10 @@ async def executar_swap(
 
         # Compatível com redes EIP-1559 e legadas.
         if tx_data.get("maxFeePerGas") and tx_data.get("maxPriorityFeePerGas"):
-            tx["maxFeePerGas"] = int(tx_data["maxFeePerGas"])
-            tx["maxPriorityFeePerGas"] = int(tx_data["maxPriorityFeePerGas"])
+            tx["maxFeePerGas"] = _parse_int_value(tx_data["maxFeePerGas"])
+            tx["maxPriorityFeePerGas"] = _parse_int_value(tx_data["maxPriorityFeePerGas"])
         elif tx_data.get("gasPrice"):
-            tx["gasPrice"] = int(tx_data["gasPrice"])
+            tx["gasPrice"] = _parse_int_value(tx_data["gasPrice"])
         else:
             tx["gasPrice"] = int(w3.eth.gas_price)
 

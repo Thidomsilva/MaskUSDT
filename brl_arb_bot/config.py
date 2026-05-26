@@ -64,9 +64,9 @@ TOKENS = {
     137: {
         "USDT": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
         "USDC": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-        "BRZ":  "0x4ed141110f6eeeaba9a1df36d8c26f684d2475dc",  # Uniswap V4 Polygon
-        "BRLA": "0xe6A537a407488807F0bbeb0038B79004f19DDd4b",  # Stabull Polygon
-        "BRL1": "0x5c067c80c00ecd2345b05e83a3e758ef799c40b5",  # Consórcio MB/Foxbit/Bitso
+        "BRZ":  "0x4eD141110F6EeeAbA9A1df36d8c26f684d2475Dc",  # Transfero Polygon
+        "BRLA": "0xE6A537a407488807F0bbeb0038B79004f19DDDFb",  # Avenia Polygon
+        "BRL1": "0x5C067C80C00eCd2345B05E83A3e758eF799C40B5",  # BRL1 Consortium Polygon
     },
     # Arbitrum
     42161: {
