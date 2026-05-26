@@ -7,6 +7,8 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from telegram.ext import ApplicationBuilder
 
 from vault.vault import init_db
@@ -71,6 +73,37 @@ def _resolve_build_id() -> str:
         return "desconhecido"
 
 
+def _env_bool(nome: str, default: bool) -> bool:
+    raw = os.environ.get(nome)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _notify_boot_admin(token: str, admin_id: str, build_id: str, started_at: str) -> None:
+    if not _env_bool("BOOT_NOTIFY_ADMIN", True):
+        return
+
+    text = (
+        "🟢 Bot reiniciado\n"
+        f"Build: {build_id}\n"
+        f"Iniciado: {started_at}"
+    )
+    body = urlencode({
+        "chat_id": admin_id,
+        "text": text,
+    }).encode()
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    req = Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urlopen(req, timeout=8):
+            pass
+    except Exception as exc:
+        logging.getLogger(__name__).warning(f"Falha ao enviar notificação de boot: {exc}")
+
+
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -86,6 +119,7 @@ def main():
     started_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     os.environ["BOT_BUILD"] = build_id
     os.environ["BOT_STARTED_AT"] = started_at
+    _notify_boot_admin(token, admin_id, build_id, started_at)
 
     app = ApplicationBuilder().token(token).build()
 
