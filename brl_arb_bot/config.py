@@ -133,9 +133,11 @@ INTERVALO_SCAN_SEG = 15     # intervalo entre scans em segundos
 # Filtro opcional de quotes USD para monitoramento.
 # Ex.: USD_QUOTES_PERMITIDAS=USDT para operar apenas pares contra USDT.
 _quotes_env = os.getenv("USD_QUOTES_PERMITIDAS", "USDT,USDC,DAI")
-USD_QUOTES_PERMITIDAS = {
-    q.strip().upper() for q in _quotes_env.split(",") if q.strip()
-}
+_quotes_validas = {"USDT", "USDC", "DAI"}
+_quotes_parsed = {q.strip().upper() for q in _quotes_env.split(",") if q.strip()}
+
+# Evita travar o scanner quando a env vem vazia/inválida no deploy.
+USD_QUOTES_PERMITIDAS = (_quotes_parsed & _quotes_validas) or _quotes_validas
 
 # ─── Notas de liquidez (referência para ajuste de amount) ────────────────────
 # Polygon BRZ/USDT pool:  ~$41k liquidez  (Uniswap V4)
