@@ -515,10 +515,14 @@ async def status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     estado  = "🟢 Rodando" if rodando else "🔴 Parado"
     addr    = user["dex_address"]
     modo    = _nome_modo(_modo_usuario(user))
+    build   = os.getenv("BOT_BUILD", "desconhecido")
+    started = os.getenv("BOT_STARTED_AT", "desconhecido")
     await update.message.reply_text(
         f"📊 *Status*\n\n"
         f"Estado: {estado}\n"
         f"Modo: *{modo}*\n"
+        f"Build: `{build}`\n"
+        f"Iniciado em: `{started}`\n"
         f"Carteira: `{addr[:8]}...{addr[-4:]}`\n"
         f"Redes: Ethereum • Polygon • Arbitrum • Base\n"
         f"Pares: BRZ/USDT • BRZ/USDC • BRLA/USDC",
