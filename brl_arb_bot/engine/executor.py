@@ -98,6 +98,18 @@ ERC20_BALANCE_ALLOWANCE_ABI = [
         "stateMutability": "view",
         "type": "function",
     },
+    {
+        "constant": False,
+        "inputs": [
+            {"name": "spender", "type": "address"},
+            {"name": "amount", "type": "uint256"},
+        ],
+        "name": "approve",
+        "outputs": [{"name": "", "type": "bool"}],
+        "payable": False,
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
 ]
 
 
@@ -259,6 +271,107 @@ def _checar_saldo_gas(
         logger.warning(f"Falha na checagem de saldo de gas: {exc}")
 
     return None
+
+
+def _allowance_atual(
+    w3: Web3,
+    chain_id: int,
+    wallet: str,
+    token_from: str,
+    spender: str | None,
+) -> int:
+    token_addr = TOKENS.get(chain_id, {}).get(token_from)
+    if not token_addr or not spender:
+        return 0
+    try:
+        owner = Web3.to_checksum_address(wallet)
+        token = w3.eth.contract(
+            address=Web3.to_checksum_address(token_addr),
+            abi=ERC20_BALANCE_ALLOWANCE_ABI,
+        )
+        return int(token.functions.allowance(owner, Web3.to_checksum_address(spender)).call())
+    except Exception:
+        return 0
+
+
+def _auto_approve_erc20(
+    w3: Web3,
+    chain_id: int,
+    private_key: str,
+    wallet: str,
+    token_from: str,
+    spender: str | None,
+    amount_wei: int,
+) -> tuple[bool, str | None]:
+    """Faz approve automático quando allowance está abaixo do necessário."""
+    token_addr = TOKENS.get(chain_id, {}).get(token_from)
+    if not token_addr:
+        return False, f"Token {token_from} não mapeado na rede {chain_id}."
+    if not spender:
+        return False, "Contrato spender não informado para approve."
+
+    try:
+        owner = Web3.to_checksum_address(wallet)
+        spender_addr = Web3.to_checksum_address(spender)
+        account = w3.eth.account.from_key(private_key)
+        token = w3.eth.contract(
+            address=Web3.to_checksum_address(token_addr),
+            abi=ERC20_BALANCE_ALLOWANCE_ABI,
+        )
+
+        approve_max = os.getenv("APPROVE_MAX_UINT", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
+        alvo_allowance = (2**256 - 1) if approve_max else amount_wei
+
+        # Alguns tokens exigem zerar allowance antes de definir novo valor.
+        passos: list[int] = []
+        atual = int(token.functions.allowance(owner, spender_addr).call())
+        if atual > 0 and atual < amount_wei:
+            passos.append(0)
+        passos.append(alvo_allowance)
+
+        gas_mult = _parse_float_env("TX_GAS_MULTIPLIER", 1.15)
+        if gas_mult < 1.0:
+            gas_mult = 1.0
+
+        receipt_timeout = int(_parse_float_env("SWAP_RECEIPT_TIMEOUT_SEC", 120))
+
+        for novo_valor in passos:
+            tx = token.functions.approve(spender_addr, int(novo_valor)).build_transaction({
+                "from": owner,
+                "nonce": w3.eth.get_transaction_count(owner, "pending"),
+                "chainId": chain_id,
+                "value": 0,
+            })
+
+            gas_est = int(w3.eth.estimate_gas({
+                "from": owner,
+                "to": tx.get("to"),
+                "data": tx.get("data"),
+                "value": 0,
+            }))
+            tx["gas"] = int(gas_est * gas_mult)
+
+            try:
+                tx["maxFeePerGas"] = int(w3.eth.gas_price)
+                tx["maxPriorityFeePerGas"] = int(_parse_float_env("APPROVE_PRIORITY_FEE_WEI", 1500000000))
+            except Exception:
+                tx["gasPrice"] = int(w3.eth.gas_price)
+
+            signed = w3.eth.account.sign_transaction(tx, private_key)
+            raw_tx = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
+            tx_hash = w3.eth.send_raw_transaction(raw_tx)
+            receipt = w3.eth.wait_for_transaction_receipt(
+                tx_hash,
+                timeout=receipt_timeout,
+                poll_latency=2,
+            )
+            if int(receipt.get("status", 0)) != 1:
+                h = tx_hash.hex()
+                return False, f"Approve falhou on-chain (status=0): {h}"
+
+        return True, None
+    except Exception as exc:
+        return False, f"Falha no approve automático: {exc}"
 
 
 def _simular_tx_call(w3: Web3, tx: dict) -> str | None:
@@ -725,7 +838,43 @@ async def executar_swap(
             spender=spender,
         )
         if erro_pretrade:
-            return {"sucesso": False, "erro": erro_pretrade}
+            auto_approve = os.getenv("AUTO_APPROVE_ERC20", "true").strip().lower() in {
+                "1", "true", "yes", "y", "on"
+            }
+            allowance_baixa = "Allowance insuficiente" in erro_pretrade
+            if auto_approve and allowance_baixa:
+                ok, erro_approve = _auto_approve_erc20(
+                    w3=w3,
+                    chain_id=chain_id,
+                    private_key=private_key,
+                    wallet=account.address,
+                    token_from=token_from,
+                    spender=spender,
+                    amount_wei=amount_wei,
+                )
+                if not ok:
+                    return {
+                        "sucesso": False,
+                        "erro": f"{erro_pretrade} | {erro_approve}",
+                    }
+
+                allowance_pos = _allowance_atual(
+                    w3=w3,
+                    chain_id=chain_id,
+                    wallet=account.address,
+                    token_from=token_from,
+                    spender=spender,
+                )
+                if allowance_pos < amount_wei:
+                    return {
+                        "sucesso": False,
+                        "erro": (
+                            "Approve automático não elevou allowance ao mínimo necessário. "
+                            f"allowance={allowance_pos}, necessário={amount_wei}."
+                        ),
+                    }
+            else:
+                return {"sucesso": False, "erro": erro_pretrade}
 
         gas_limite = _parse_int_value(tx_data.get("gas", 0))
         if gas_limite <= 0:
