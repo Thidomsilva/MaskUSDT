@@ -36,6 +36,8 @@ MENU_GIF: str = os.getenv("MENU_GIF", "")
 
 WAIT_ADDRESS, WAIT_PK = range(2)
 MENU_HAMBURGER = "☰ Menu"
+TOKENS_USD = {"USDT", "USDC", "DAI"}
+TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
 
 
 def _teclado_hamburger() -> ReplyKeyboardMarkup:
@@ -325,10 +327,45 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             explorer = resultado["explorer"]
             fonte    = resultado.get("fonte") or "dex"
             approves = resultado.get("approve_explorers") or []
+            received_amount = float(resultado.get("received_token_amount") or 0)
+            received_symbol = resultado.get("received_token_symbol") or token_to
             approve_txt = ""
             if approves:
                 linhas = [f"• [Approve {i + 1}]({url})" for i, url in enumerate(approves[:3])]
                 approve_txt = "\n\n✅ *Approve automático detectado*\n" + "\n".join(linhas)
+
+            ciclo_txt = ""
+            close_cycle = os.getenv("CLOSE_CYCLE_ENABLED", "true").strip().lower() in {
+                "1", "true", "yes", "y", "on"
+            }
+            if close_cycle and token_from in TOKENS_USD and token_to in TOKENS_BRL and received_amount > 0:
+                await query.message.reply_text(
+                    "🔁 Tentando fechar ciclo para realizar lucro em USD...",
+                    parse_mode="Markdown",
+                )
+                resultado_volta = await executar_swap(
+                    chain_id=chain_id,
+                    token_from=token_to,
+                    token_to=token_from,
+                    amount_usd=received_amount,
+                    wallet=user["dex_address"],
+                    private_key=user["dex_pk"],
+                )
+                if resultado_volta.get("sucesso"):
+                    usd_recebido = float(resultado_volta.get("received_token_amount") or 0)
+                    lucro_real = usd_recebido - float(amount_usd)
+                    ciclo_txt = (
+                        "\n\n🔁 *Ciclo fechado*\n"
+                        f"Volta: `{token_to}->{token_from}`\n"
+                        f"Recebido: `{usd_recebido:.6f} {token_from}`\n"
+                        f"💰 Lucro realizado: `${lucro_real:.4f}`"
+                    )
+                else:
+                    ciclo_txt = (
+                        "\n\n⚠️ *Ciclo não fechado*\n"
+                        f"Saldo permaneceu em `{received_symbol}`.\n"
+                        f"Erro na volta: `{resultado_volta.get('erro', 'desconhecido')}`"
+                    )
             registrar_operacao(uid, rede_nome, par, spread_pct, lucro_est, tx_hash, "sucesso")
             await query.edit_message_text(
                 f"✅ *Swap executado!*\n\n"
@@ -337,7 +374,8 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"Lucro est.: `${lucro_est:.4f}`\n\n"
                 f"Via: `{fonte}`\n"
                 f"🔗 [Ver no explorer]({explorer})"
-                f"{approve_txt}",
+                f"{approve_txt}"
+                f"{ciclo_txt}",
                 parse_mode="Markdown",
                 disable_web_page_preview=True
             )

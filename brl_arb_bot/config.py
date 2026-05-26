@@ -6,11 +6,12 @@ Tokens monitorados:
   BRZ  — Transfero         (Polygon, Ethereum, Arbitrum)
   BRLA — Stabull           (Polygon, Base)
   BRL1 — Consórcio MB/Foxbit/Bitso  (Polygon)
+    DAI  — MakerDAO          (Polygon)
 
 Pares: TODOS contra TODOS onde houver liquidez
-  BRZ  ↔ USDT, USDC
-  BRLA ↔ USDT, USDC
-  BRL1 ↔ USDT, USDC
+    BRZ  ↔ USDT, USDC, DAI
+    BRLA ↔ USDT, USDC, DAI
+    BRL1 ↔ USDT, USDC, DAI
   BRZ  ↔ BRLA              ← novo
   BRZ  ↔ BRL1              ← novo
   BRLA ↔ BRL1              ← novo
@@ -64,6 +65,7 @@ TOKENS = {
     137: {
         "USDT": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
         "USDC": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "DAI":  "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
         "BRZ":  "0x4eD141110F6EeeAbA9A1df36d8c26f684d2475Dc",  # Transfero Polygon
         "BRLA": "0xE6A537a407488807F0bbeb0038B79004f19DDDFb",  # Avenia Polygon
         "BRL1": "0x5C067C80C00eCd2345B05E83A3e758eF799C40B5",  # BRL1 Consortium Polygon
@@ -95,10 +97,13 @@ PARES_MONITORADOS = {
         # BRL vs USD  (pares com maior volume)
         ("BRZ",  "USDT"),
         ("BRZ",  "USDC"),
+        ("BRZ",  "DAI"),
         ("BRLA", "USDT"),
         ("BRLA", "USDC"),
+        ("BRLA", "DAI"),
         ("BRL1", "USDT"),
         ("BRL1", "USDC"),
+        ("BRL1", "DAI"),
         # BRL vs BRL  ← maior alpha, menor concorrência
         ("BRZ",  "BRLA"),
         ("BRZ",  "BRL1"),

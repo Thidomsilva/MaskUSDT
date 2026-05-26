@@ -263,6 +263,26 @@ def _to_wei_amount(chain_id: int, token_symbol: str, amount_usd: float) -> int:
     return int(amount_usd * (10 ** decimais))
 
 
+def _token_balance_wei(
+    w3: Web3,
+    chain_id: int,
+    wallet: str,
+    token_symbol: str,
+) -> int:
+    token_addr = TOKENS.get(chain_id, {}).get(token_symbol)
+    if not token_addr:
+        return 0
+    try:
+        owner = Web3.to_checksum_address(wallet)
+        token = w3.eth.contract(
+            address=Web3.to_checksum_address(token_addr),
+            abi=ERC20_BALANCE_ALLOWANCE_ABI,
+        )
+        return int(token.functions.balanceOf(owner).call())
+    except Exception:
+        return 0
+
+
 def _checar_pretrade_erc20(
     w3: Web3,
     chain_id: int,
@@ -886,6 +906,13 @@ async def executar_swap(
         account = w3.eth.account.from_key(private_key)
         approve_explorers: list[str] = []
 
+        saldo_to_antes = _token_balance_wei(
+            w3=w3,
+            chain_id=chain_id,
+            wallet=account.address,
+            token_symbol=token_to,
+        )
+
         # Monta a transação com nonce e gas atuais
         tx = {
             "from":     account.address,
@@ -1066,6 +1093,20 @@ async def executar_swap(
                 "approve_explorers": approve_explorers,
             }
 
+        saldo_to_depois = _token_balance_wei(
+            w3=w3,
+            chain_id=chain_id,
+            wallet=account.address,
+            token_symbol=token_to,
+        )
+        recebido_wei = max(0, saldo_to_depois - saldo_to_antes)
+        recebido_amount = 0.0
+        if recebido_wei > 0:
+            token_to_addr = TOKENS.get(chain_id, {}).get(token_to)
+            if token_to_addr:
+                dec_to = _token_decimais(chain_id, token_to_addr)
+                recebido_amount = recebido_wei / (10 ** dec_to)
+
         sl_info = rota.get("slippage")
         if sl_info:
             logger.info(
@@ -1081,6 +1122,9 @@ async def executar_swap(
             "explorer": _explorer_tx_url(chain_id, tx_hash_hex),
             "fonte": fonte,
             "approve_explorers": approve_explorers,
+            "received_token_wei": recebido_wei,
+            "received_token_amount": recebido_amount,
+            "received_token_symbol": token_to,
         }
 
     except Exception as e:

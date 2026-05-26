@@ -1,5 +1,5 @@
 """
-prices.py — Busca preços reais de BRZ/BRLA/BRL1 vs USDT/USDC.
+prices.py — Busca preços reais de BRZ/BRLA/BRL1 vs USDT/USDC/DAI.
 Fontes: 1inch Price API (gratuita) + GeckoTerminal (gratuita, sem key).
 """
 
@@ -447,15 +447,16 @@ async def buscar_saldo_polygon(address: str) -> dict:
         return None
 
     loop = _asyncio.get_event_loop()
-    pol, usdt, usdc, brz, brla, brl1 = await _asyncio.gather(
+    pol, usdt, usdc, dai, brz, brla, brl1 = await _asyncio.gather(
         loop.run_in_executor(None, _saldo_nativo),
         loop.run_in_executor(None, _saldo_erc20, "USDT"),
         loop.run_in_executor(None, _saldo_erc20, "USDC"),
+        loop.run_in_executor(None, _saldo_erc20, "DAI"),
         loop.run_in_executor(None, _saldo_erc20, "BRZ"),
         loop.run_in_executor(None, _saldo_erc20, "BRLA"),
         loop.run_in_executor(None, _saldo_erc20, "BRL1"),
     )
-    return {"POL": pol, "USDT": usdt, "USDC": usdc, "BRZ": brz, "BRLA": brla, "BRL1": brl1}
+    return {"POL": pol, "USDT": usdt, "USDC": usdc, "DAI": dai, "BRZ": brz, "BRLA": brla, "BRL1": brl1}
 
 
 def _normalizar_preco(preco: float | None) -> float | None:
@@ -510,7 +511,7 @@ async def buscar_todos_precos() -> dict:
         async def fetch_preco(chain_id, simbolo, address):
             usd_symbol, usd_address = _token_usd_referencia(chain_id)
 
-            if simbolo in {"USDT", "USDC"}:
+            if simbolo in {"USDT", "USDC", "DAI"}:
                 return chain_id, simbolo, 1.0
 
             # Tenta 1inch primeiro, fallback GeckoTerminal

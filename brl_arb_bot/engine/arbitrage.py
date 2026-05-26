@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 AUTO_COOLDOWN_SEG = int(os.getenv("AUTO_COOLDOWN_SEG", "45"))
 MANUAL_ALERT_COOLDOWN_SEG = int(os.getenv("MANUAL_ALERT_COOLDOWN_SEG", "45"))
-TOKENS_USD = {"USDT", "USDC"}
+TOKENS_USD = {"USDT", "USDC", "DAI"}
 TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
 
 
@@ -223,6 +223,39 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                             private_key=user["dex_pk"],
                         )
 
+                        ciclo_txt = ""
+                        close_cycle = os.getenv("CLOSE_CYCLE_ENABLED", "true").strip().lower() in {
+                            "1", "true", "yes", "y", "on"
+                        }
+                        if (
+                            resultado.get("sucesso")
+                            and close_cycle
+                            and token_from in TOKENS_USD
+                            and token_to in TOKENS_BRL
+                        ):
+                            recebido = float(resultado.get("received_token_amount") or 0)
+                            if recebido > 0:
+                                resultado_volta = await executar_swap(
+                                    chain_id=melhor.chain_id,
+                                    token_from=token_to,
+                                    token_to=token_from,
+                                    amount_usd=recebido,
+                                    wallet=user["dex_address"],
+                                    private_key=user["dex_pk"],
+                                )
+                                if resultado_volta.get("sucesso"):
+                                    usd_recebido = float(resultado_volta.get("received_token_amount") or 0)
+                                    lucro_real = usd_recebido - float(melhor.amount_usd)
+                                    ciclo_txt = (
+                                        f"\n\n🔁 Ciclo fechado `{token_to}->{token_from}`"
+                                        f"\n💰 Lucro realizado: `${lucro_real:.4f}`"
+                                    )
+                                else:
+                                    ciclo_txt = (
+                                        f"\n\n⚠️ Ciclo não fechado (saldo em {token_to})."
+                                        f"\nErro volta: `{resultado_volta.get('erro', 'desconhecido')}`"
+                                    )
+
                         if resultado.get("sucesso"):
                             tx_hash = resultado.get("tx_hash", "")
                             explorer = resultado.get("explorer", tx_hash)
@@ -244,6 +277,7 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                                     f"🟢 Spread: `{melhor.spread_pct:.3f}%`\n"
                                     f"🟡 Lucro est.: `${melhor.lucro_usd:.4f}`\n\n"
                                     f"🔗 [Ver no explorer]({explorer})"
+                                    f"{ciclo_txt}"
                                 ),
                                 parse_mode="Markdown",
                                 disable_web_page_preview=True,
