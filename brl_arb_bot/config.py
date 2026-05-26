@@ -28,7 +28,7 @@ NETWORKS = {
     },
     137: {
         "name":          "Polygon",
-        "rpc":           "https://rpc.ankr.com/polygon",
+        "rpc":           "https://polygon-bor-rpc.publicnode.com",
         "symbol":        "POL",
         "gas_token_usd": 0.5,
         "1inch_chain":   "137",

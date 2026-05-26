@@ -408,9 +408,9 @@ async def buscar_saldo_polygon(address: str) -> dict:
     import asyncio as _asyncio
 
     RPCS = [
-        "https://polygon-rpc.com",
-        "https://rpc.ankr.com/polygon",
-        "https://rpc-mainnet.matic.network",
+        "https://polygon-bor-rpc.publicnode.com",   # ✅ testado e funcional
+        "https://polygon.gateway.tenderly.co",
+        "https://polygon.drpc.org",
     ]
     tokens_polygon = TOKENS[137]
     checksum_addr = Web3.to_checksum_address(address)
