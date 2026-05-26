@@ -1,3 +1,47 @@
+from engine.chain import iniciar_ciclo, loop_cadeia
+from vault.vault import get_posicao_aberta, get_numero_ciclos, get_saldo_historico
+# ─── Comando /ciclo ──────────────────────────────────────────────────────────
+async def ciclo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    posicao = get_posicao_aberta(uid)
+    if posicao:
+        from datetime import datetime
+        tempo_aberto = (datetime.fromisoformat(posicao["updated_at"]) - datetime.fromisoformat(posicao["created_at"])).total_seconds()
+        minutos = int(tempo_aberto // 60)
+        hops = len(json.loads(posicao["hops"]))
+        lucro = posicao["saldo_atual_usd"] - posicao["saldo_entrada"]
+        await update.message.reply_text(
+            f"🔗 *Ciclo {posicao['ciclo_numero']} em andamento*\n"
+            f"Token atual: `{posicao['token_atual']}`\n"
+            f"Amount: `{posicao['amount_token']:.4f}`\n"
+            f"Saldo entrada: `${posicao['saldo_entrada']:.2f}`\n"
+            f"Saldo estimado atual: `${posicao['saldo_atual_usd']:.2f}`\n"
+            f"Lucro acumulado: `${lucro:.2f}`\n"
+            f"Hops: `{hops}`\n"
+            f"Tempo aberto: `{minutos} min`",
+            parse_mode="Markdown"
+        )
+    else:
+        # Mostra último ciclo fechado
+        hist = get_saldo_historico(uid)
+        await update.message.reply_text(
+            f"💰 *Resumo dos ciclos*\n"
+            f"Saldo inicial: `${hist['saldo_inicial']:.2f}`\n"
+            f"Saldo atual: `${hist['saldo_atual']:.2f}`\n"
+            f"Lucro total: `${hist['lucro_total']:.2f}`\n"
+            f"Total ciclos: `{hist['total_ciclos']}`\n"
+            f"Tempo médio por ciclo: `{int(hist['tempo_medio_ciclo']//60)} min`",
+            parse_mode="Markdown"
+        )
+
+# ─── Botão painel aluno ──────────────────────────────────────────────────────
+def _menu_aluno():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 Meu Ciclo Atual", callback_data="painel|ciclo")],
+        [InlineKeyboardButton("📊 Histórico", callback_data="painel|historico")],
+        [InlineKeyboardButton("⚙️ Modo", callback_data="painel|modo")],
+    ])
+
 """
 handlers.py — Handlers do bot Telegram com botões inline Executar / Ignorar.
 """
@@ -234,7 +278,6 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not user:
             await query.answer("Use /cadastrar primeiro.", show_alert=True)
             return
-        from bot.dashboard import _menu_aluno
         await query.message.reply_text(
             "📱 *Meu Painel*\n\nEscolha o que deseja ver:",
             parse_mode="Markdown",
@@ -242,17 +285,59 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "painel|ciclo":
+        posicao = get_posicao_aberta(uid)
+        if posicao:
+            from datetime import datetime
+            tempo_aberto = (datetime.fromisoformat(posicao["updated_at"]) - datetime.fromisoformat(posicao["created_at"])).total_seconds()
+            minutos = int(tempo_aberto // 60)
+            hops = len(json.loads(posicao["hops"]))
+            lucro = posicao["saldo_atual_usd"] - posicao["saldo_entrada"]
+            await query.message.reply_text(
+                f"Status: 🟢 Ciclo {posicao['ciclo_numero']} em andamento\n"
+                f"Posição: `{posicao['token_atual']}` (${posicao['saldo_atual_usd']:.2f})\n"
+                f"Entrada: `${posicao['saldo_entrada']:.2f}`\n"
+                f"Lucro acumulado: `${lucro:.2f}`\n"
+                f"Hops: `{hops}`\n"
+                f"Tempo: `{minutos} min`",
+                parse_mode="Markdown"
+            )
+        else:
+            hist = get_saldo_historico(uid)
+            await query.message.reply_text(
+                f"Nenhum ciclo aberto.\n\n"
+                f"Saldo atual: `${hist['saldo_atual']:.2f}`\n"
+                f"Total ciclos: `{hist['total_ciclos']}`",
+                parse_mode="Markdown"
+            )
+        return
+
     if data == "start|admin":
         if not is_admin(uid):
             await query.answer("⛔ Acesso restrito.", show_alert=True)
             return
         from bot.admin import _menu_admin
+        from vault.vault import VAULT_DB
+        import sqlite3
+        con = sqlite3.connect(VAULT_DB)
+        total_ativos = con.execute("SELECT COUNT(*) FROM posicoes WHERE status='aberto'").fetchone()[0]
+        fechados_hoje = con.execute("SELECT COUNT(*) FROM posicoes WHERE status='fechado' AND date(updated_at)=date('now')").fetchone()[0]
+        lucro_medio = con.execute("SELECT AVG(saldo_atual_usd - saldo_entrada) FROM posicoes WHERE status='fechado' AND date(updated_at)=date('now')").fetchone()[0] or 0
+        tempo_medio = con.execute("SELECT AVG((julianday(updated_at)-julianday(created_at))*24*60) FROM posicoes WHERE status='fechado' AND date(updated_at)=date('now')").fetchone()[0] or 0
+        con.close()
         await query.message.reply_text(
-            "🟠 *ADMIN*\n🛡️ *Painel Administrativo*\n\nAcesso restrito ao administrador.\nO que deseja ver?",
+            f"🔗 Ciclos ativos agora: {total_ativos}\n"
+            f"✅ Ciclos fechados hoje: {fechados_hoje}\n"
+            f"💰 Lucro médio por ciclo: ${lucro_medio:.2f}\n"
+            f"⏱ Tempo médio por ciclo: {int(tempo_medio)}min",
             parse_mode="Markdown",
             reply_markup=_menu_admin(),
         )
         return
+def registrar_todos_handlers_ciclo(app):
+    app.add_handler(CommandHandler("ciclo", ciclo))
+# No final do arquivo, registre o handler do ciclo
+definicoes_extra = [CommandHandler("ciclo", ciclo)]
 
     if data.startswith("mode|"):
         novo_modo = data.split("|", 1)[1]

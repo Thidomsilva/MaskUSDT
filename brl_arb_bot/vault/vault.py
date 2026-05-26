@@ -148,6 +148,23 @@ def init_db():
         )
     """)
 
+    # Tabela de posições de ciclo
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS posicoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER,
+            ciclo_numero INTEGER,
+            token_atual TEXT,
+            amount_token REAL,
+            saldo_entrada REAL,
+            saldo_atual_usd REAL,
+            hops TEXT,
+            status TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
     # Migração simples para bases antigas.
     cols = {
         row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()
@@ -277,6 +294,10 @@ def admin_stats_gerais() -> dict:
         WHERE status='sucesso' AND date(created_at)=date('now')
     """).fetchone()[0]
     melhor_spread   = con.execute("SELECT COALESCE(MAX(spread_pct),0) FROM operacoes WHERE status='sucesso'").fetchone()[0]
+
+
+
+    # ─── Funções de ciclo de arbitragem ───────────────────────────────────────────
 
     # Top rede por operações
     top_rede = con.execute("""
