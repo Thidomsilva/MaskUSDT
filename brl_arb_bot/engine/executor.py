@@ -289,19 +289,20 @@ def _allowance_atual(
     wallet: str,
     token_from: str,
     spender: str | None,
-) -> int:
+) -> tuple[bool, int]:
     token_addr = TOKENS.get(chain_id, {}).get(token_from)
     if not token_addr or not spender:
-        return 0
+        return False, 0
     try:
         owner = Web3.to_checksum_address(wallet)
         token = w3.eth.contract(
             address=Web3.to_checksum_address(token_addr),
             abi=ERC20_BALANCE_ALLOWANCE_ABI,
         )
-        return int(token.functions.allowance(owner, Web3.to_checksum_address(spender)).call())
+        allow = int(token.functions.allowance(owner, Web3.to_checksum_address(spender)).call())
+        return True, allow
     except Exception:
-        return 0
+        return False, 0
 
 
 def _auto_approve_erc20(
@@ -872,14 +873,14 @@ async def executar_swap(
                         "approve_explorers": approve_explorers,
                     }
 
-                allowance_pos = _allowance_atual(
+                allowance_ok, allowance_pos = _allowance_atual(
                     w3=w3,
                     chain_id=chain_id,
                     wallet=account.address,
                     token_from=token_from,
                     spender=spender,
                 )
-                if allowance_pos < amount_wei:
+                if (not allowance_ok) or allowance_pos < amount_wei:
                     return {
                         "sucesso": False,
                         "erro": (
@@ -890,6 +891,58 @@ async def executar_swap(
                     }
             else:
                 return {"sucesso": False, "erro": erro_pretrade}
+
+        # Barreira final anti-revert por allowance: se a leitura falhar ou estiver baixa,
+        # tenta approve automático antes de assinar o swap.
+        auto_approve = os.getenv("AUTO_APPROVE_ERC20", "true").strip().lower() in {
+            "1", "true", "yes", "y", "on"
+        }
+        if auto_approve and spender:
+            allowance_ok, allowance_now = _allowance_atual(
+                w3=w3,
+                chain_id=chain_id,
+                wallet=account.address,
+                token_from=token_from,
+                spender=spender,
+            )
+            if (not allowance_ok) or allowance_now < amount_wei:
+                ok, erro_approve, approve_extra = _auto_approve_erc20(
+                    w3=w3,
+                    chain_id=chain_id,
+                    private_key=private_key,
+                    wallet=account.address,
+                    token_from=token_from,
+                    spender=spender,
+                    amount_wei=amount_wei,
+                )
+                if approve_extra:
+                    approve_explorers.extend(approve_extra)
+                if not ok:
+                    return {
+                        "sucesso": False,
+                        "erro": (
+                            "Allowance não pôde ser confirmado antes do swap "
+                            f"(ok={allowance_ok}, atual={allowance_now}). {erro_approve}"
+                        ),
+                        "approve_explorers": approve_explorers,
+                    }
+
+                allowance_ok, allowance_now = _allowance_atual(
+                    w3=w3,
+                    chain_id=chain_id,
+                    wallet=account.address,
+                    token_from=token_from,
+                    spender=spender,
+                )
+                if (not allowance_ok) or allowance_now < amount_wei:
+                    return {
+                        "sucesso": False,
+                        "erro": (
+                            "Allowance ainda insuficiente após approve automático. "
+                            f"ok={allowance_ok}, allowance={allowance_now}, necessário={amount_wei}."
+                        ),
+                        "approve_explorers": approve_explorers,
+                    }
 
         gas_limite = _parse_int_value(tx_data.get("gas", 0))
         if gas_limite <= 0:
