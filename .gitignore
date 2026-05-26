@@ -1,3 +1,13 @@
+# Segredos / ambiente
 .env
+**/.env
+.env.*
+**/.env.*
+
+# Cofre local (nunca versionar)
+**/vault/users.db
+**/vault/.vault_key
+
+# Artefatos
 *.zip
 *.sha256

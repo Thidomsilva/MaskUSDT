@@ -264,7 +264,7 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-        user       = get_user(uid)
+        user       = get_user(uid, include_pk=True)
         if not user:
             await query.edit_message_text("❌ Usuário não encontrado. Use /cadastrar.")
             return

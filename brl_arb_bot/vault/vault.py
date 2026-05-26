@@ -5,8 +5,12 @@ Acesso ao banco: somente o admin (ADMIN_TELEGRAM_ID no .env).
 
 import os
 import sqlite3
+import logging
 from cryptography.fernet import Fernet
 from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
 
 
 def _load_env() -> None:
@@ -49,15 +53,58 @@ def is_admin(telegram_id: int) -> bool:
     return telegram_id == ADMIN_ID
 
 
+def _env_bool(nome: str, default: bool = False) -> bool:
+    raw = os.environ.get(nome)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _validar_fernet_key(raw_key: str) -> bytes:
+    key = raw_key.strip().encode()
+    try:
+        Fernet(key)
+    except Exception as exc:
+        raise RuntimeError(
+            "VAULT_MASTER_KEY inválida. Gere uma Fernet key URL-safe base64 com 32 bytes."
+        ) from exc
+    return key
+
+
+def _lock_file(path: Path) -> None:
+    try:
+        path.chmod(0o600)
+    except Exception:
+        pass
+
+
 # ─── Criptografia ─────────────────────────────────────────────────────────────
 
 def _load_or_create_key() -> bytes:
+    env_key = os.environ.get("VAULT_MASTER_KEY", "").strip()
+    require_env_key = _env_bool("VAULT_REQUIRE_ENV_KEY", False)
+
+    if env_key:
+        return _validar_fernet_key(env_key)
+
+    if require_env_key:
+        raise RuntimeError(
+            "Segurança estrita ativa: defina VAULT_MASTER_KEY no ambiente do deploy."
+        )
+
     KEY_FILE.parent.mkdir(exist_ok=True)
     if KEY_FILE.exists():
-        return KEY_FILE.read_bytes()
+        key = KEY_FILE.read_text(encoding="utf-8").strip()
+        _lock_file(KEY_FILE)
+        return _validar_fernet_key(key)
+
     key = Fernet.generate_key()
     KEY_FILE.write_bytes(key)
-    KEY_FILE.chmod(0o600)
+    _lock_file(KEY_FILE)
+    logger.warning(
+        "VAULT_MASTER_KEY ausente; usando fallback local em vault/.vault_key. "
+        "Para alta segurança, ative VAULT_REQUIRE_ENV_KEY=true e forneça a chave via ambiente."
+    )
     return key
 
 
@@ -110,6 +157,7 @@ def init_db():
 
     con.commit()
     con.close()
+    _lock_file(VAULT_DB)
 
 
 # ─── Usuários ─────────────────────────────────────────────────────────────────
@@ -128,7 +176,7 @@ def save_user(telegram_id: int, username: str, address: str, pk: str):
     con.close()
 
 
-def get_user(telegram_id: int) -> dict | None:
+def get_user(telegram_id: int, include_pk: bool = False) -> dict | None:
     con = sqlite3.connect(VAULT_DB)
     row = con.execute(
         "SELECT telegram_id,username,dex_address,dex_pk,trading_mode,active,created_at "
@@ -137,15 +185,17 @@ def get_user(telegram_id: int) -> dict | None:
     con.close()
     if not row:
         return None
-    return {
+    user = {
         "telegram_id": row[0],
         "username":    row[1],
         "dex_address": row[2],
-        "dex_pk":      _dec(row[3]),
         "trading_mode": row[4] or "manual",
         "active":      row[5],
         "created_at":  row[6],
     }
+    if include_pk:
+        user["dex_pk"] = _dec(row[3])
+    return user
 
 
 def set_user_trading_mode(telegram_id: int, mode: str) -> None:

@@ -184,7 +184,7 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
             oportunidades = await detectar_oportunidades()
             if oportunidades:
                 melhor = oportunidades[0]
-                user = get_user(telegram_id)
+                user = get_user(telegram_id, include_pk=True)
                 if not user:
                     logger.warning(f"[uid={telegram_id}] Usuário não encontrado no vault, encerrando loop.")
                     bot_data[f"running_{telegram_id}"] = False
