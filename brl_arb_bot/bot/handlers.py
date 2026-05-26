@@ -146,7 +146,12 @@ def montar_alerta(oport, bot_data: dict | None = None, uid: int | None = None) -
 
 async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as exc:
+        if "Query is too old" not in str(exc) and "query id is invalid" not in str(exc):
+            raise
+        return
     uid  = query.from_user.id
     data = query.data
 

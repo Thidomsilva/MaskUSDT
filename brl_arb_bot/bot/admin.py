@@ -6,6 +6,7 @@ Navegação 100% via botões inline no Telegram.
 
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 from vault.vault import (
     is_admin,
@@ -64,7 +65,12 @@ async def painel_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 @apenas_admin
 async def callback_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as exc:
+        if "Query is too old" not in str(exc) and "query id is invalid" not in str(exc):
+            raise
+        return
     acao = query.data.split("|")[1]
 
     if acao == "fechar":

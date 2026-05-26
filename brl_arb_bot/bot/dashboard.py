@@ -5,6 +5,7 @@ Navegação via botões inline — tudo dentro do Telegram.
 
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 from vault.vault import get_user, user_exists, historico_usuario
 
@@ -39,7 +40,12 @@ async def menu_dashboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def callback_dashboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as exc:
+        if "Query is too old" not in str(exc) and "query id is invalid" not in str(exc):
+            raise
+        return
     uid  = query.from_user.id
     acao = query.data.split("|")[1]
 
