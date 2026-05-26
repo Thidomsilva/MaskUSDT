@@ -1,0 +1,85 @@
+name: Deploy ArbBot VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-arbbot-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SERVICE: ${{ secrets.DEPLOY_SERVICE }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_SERVICE DEPLOY_SSH_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Secret ausente: $name"
+              exit 1
+            fi
+          done
+
+      - name: Setup SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Sync code to VPS
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'venv/' \
+            --exclude '__pycache__/' \
+            --exclude '.env' \
+            --exclude 'vault/users.db' \
+            --exclude 'vault/.vault_key' \
+            -e 'ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes' \
+            brl_arb_bot/ "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/"
+
+      - name: Restart service on VPS
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SERVICE: ${{ secrets.DEPLOY_SERVICE }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "
+            set -euo pipefail
+            cd '${DEPLOY_PATH}'
+            systemctl restart '${DEPLOY_SERVICE}'
+            systemctl is-active --quiet '${DEPLOY_SERVICE}'
+            echo 'Deploy concluido com sucesso.'
+            echo 'Service:' '${DEPLOY_SERVICE}'
+            systemctl status '${DEPLOY_SERVICE}' --no-pager -l | head -n 30
+          "
