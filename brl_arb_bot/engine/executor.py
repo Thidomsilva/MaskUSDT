@@ -170,6 +170,46 @@ def _parse_float_env(nome: str, default: float) -> float:
         return default
 
 
+def _priority_fee_floor_wei(chain_id: int) -> int:
+    defaults = {
+        137: 30_000_000_000,
+    }
+    env_name = f"APPROVE_PRIORITY_FEE_WEI_{chain_id}"
+    raw = os.getenv(env_name, "").strip() or os.getenv("APPROVE_PRIORITY_FEE_WEI", "").strip()
+    if raw:
+        return _parse_int_value(raw, defaults.get(chain_id, 1_500_000_000))
+    return defaults.get(chain_id, 1_500_000_000)
+
+
+def _apply_fee_params(tx: dict, w3: Web3, chain_id: int) -> None:
+    """Define fees compatíveis com a rede atual para transações locais (ex.: approve)."""
+    priority_floor = _priority_fee_floor_wei(chain_id)
+
+    try:
+        latest_block = w3.eth.get_block("latest")
+        base_fee = int(latest_block.get("baseFeePerGas") or 0)
+    except Exception:
+        base_fee = 0
+
+    try:
+        network_priority = int(getattr(w3.eth, "max_priority_fee", 0) or 0)
+    except Exception:
+        network_priority = 0
+
+    priority_fee = max(priority_floor, network_priority)
+    gas_price = int(w3.eth.gas_price)
+
+    if base_fee > 0:
+        max_fee = max(gas_price, base_fee + (priority_fee * 2))
+        tx["maxPriorityFeePerGas"] = priority_fee
+        tx["maxFeePerGas"] = max_fee
+        tx.pop("gasPrice", None)
+    else:
+        tx["gasPrice"] = max(gas_price, priority_fee)
+        tx.pop("maxPriorityFeePerGas", None)
+        tx.pop("maxFeePerGas", None)
+
+
 def _slippage_steps() -> list[str]:
     """Lista de slippage (%) para tentativas de quote do 1inch."""
     raw = os.getenv("SWAP_SLIPPAGE_STEPS", "0.5,1,2,3")
@@ -367,11 +407,7 @@ def _auto_approve_erc20(
             }))
             tx["gas"] = int(gas_est * gas_mult)
 
-            try:
-                tx["maxFeePerGas"] = int(w3.eth.gas_price)
-                tx["maxPriorityFeePerGas"] = int(_parse_float_env("APPROVE_PRIORITY_FEE_WEI", 1500000000))
-            except Exception:
-                tx["gasPrice"] = int(w3.eth.gas_price)
+            _apply_fee_params(tx, w3, chain_id)
 
             signed = w3.eth.account.sign_transaction(tx, private_key)
             raw_tx = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
