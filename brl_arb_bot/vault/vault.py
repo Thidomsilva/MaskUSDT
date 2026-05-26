@@ -7,9 +7,36 @@ import os
 import sqlite3
 from cryptography.fernet import Fernet
 from pathlib import Path
-from dotenv import load_dotenv
 
-load_dotenv()
+
+def _load_env() -> None:
+    paths = [
+        Path(__file__).resolve().parent.parent / ".env",
+        Path(__file__).resolve().parent.parent.parent / ".env",
+    ]
+
+    try:
+        from dotenv import load_dotenv  # type: ignore
+
+        for p in paths:
+            if p.exists():
+                load_dotenv(p, override=False)
+        return
+    except Exception:
+        pass
+
+    for p in paths:
+        if not p.exists():
+            continue
+        for line in p.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, v = s.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_env()
 
 VAULT_DB  = Path("vault/users.db")
 KEY_FILE  = Path("vault/.vault_key")
