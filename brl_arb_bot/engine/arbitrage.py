@@ -19,6 +19,7 @@ from vault.vault import get_user, registrar_operacao
 logger = logging.getLogger(__name__)
 
 AUTO_COOLDOWN_SEG = int(os.getenv("AUTO_COOLDOWN_SEG", "45"))
+MANUAL_ALERT_COOLDOWN_SEG = int(os.getenv("MANUAL_ALERT_COOLDOWN_SEG", "45"))
 
 
 @dataclass
@@ -196,14 +197,29 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                     else:
                         logger.info(f"[uid={telegram_id}] Cooldown ativo do auto-trade.")
                 else:
-                    texto, teclado = montar_alerta(melhor, bot_data=bot_data, uid=telegram_id)
-                    await bot.send_message(
-                        chat_id=telegram_id,
-                        text=texto,
-                        parse_mode="Markdown",
-                        reply_markup=teclado
+                    now = time.time()
+                    sig = (
+                        f"{melhor.chain_id}|{melhor.token_brl}|{melhor.token_usd}|"
+                        f"{token_from}|{token_to}|{round(melhor.amount_usd, 2)}"
                     )
-                    logger.info(f"[uid={telegram_id}] Alerta enviado: {melhor.rede} {melhor.token_brl}/{melhor.token_usd}")
+                    last_sig_key = f"manual_last_sig_{telegram_id}"
+                    last_ts_key = f"manual_last_alert_ts_{telegram_id}"
+                    last_sig = bot_data.get(last_sig_key)
+                    last_ts = float(bot_data.get(last_ts_key, 0.0))
+
+                    if sig == last_sig and (now - last_ts) < MANUAL_ALERT_COOLDOWN_SEG:
+                        logger.info(f"[uid={telegram_id}] Cooldown ativo do alerta manual.")
+                    else:
+                        texto, teclado = montar_alerta(melhor, bot_data=bot_data, uid=telegram_id)
+                        await bot.send_message(
+                            chat_id=telegram_id,
+                            text=texto,
+                            parse_mode="Markdown",
+                            reply_markup=teclado
+                        )
+                        bot_data[last_sig_key] = sig
+                        bot_data[last_ts_key] = now
+                        logger.info(f"[uid={telegram_id}] Alerta enviado: {melhor.rede} {melhor.token_brl}/{melhor.token_usd}")
         except Exception as e:
             logger.error(f"[uid={telegram_id}] Erro no loop: {e}")
 
