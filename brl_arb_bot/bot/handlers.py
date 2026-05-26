@@ -129,6 +129,7 @@ def _store_exec_payload(bot_data: dict, uid: int, payload: dict) -> str:
 def montar_alerta(oport, bot_data: dict | None = None, uid: int | None = None) -> tuple[str, InlineKeyboardMarkup]:
     from config import NETWORKS
     rede = NETWORKS[oport.chain_id]["name"]
+    valor_final = oport.amount_usd + oport.lucro_usd
 
     token_from, token_to = _resolver_tokens_execucao(oport)
 
@@ -142,7 +143,8 @@ def montar_alerta(oport, bot_data: dict | None = None, uid: int | None = None) -
         f"─────────────────────\n"
         f"🔴 Fee swap: `-${oport.fee_swap_usd:.4f}`\n"
         f"🔴 Gas est.: `-${oport.gas_usd:.4f}`\n"
-        f"🟡 *Lucro líquido est.: `${oport.lucro_usd:.4f}`*"
+        f"🟡 *Lucro líquido est.: `${oport.lucro_usd:.4f}`*\n"
+        f"🔵 *Valor final est.: `${valor_final:.4f}`*"
     )
     payload = {
         "c":  oport.chain_id,
