@@ -314,8 +314,13 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         else:
             registrar_operacao(uid, rede_nome, par, spread_pct, 0, "", "erro")
+            tx_hash = resultado.get("tx_hash")
+            explorer = resultado.get("explorer")
+            detalhe_tx = ""
+            if tx_hash and explorer:
+                detalhe_tx = f"\n\n🔗 [Ver transação]({explorer})"
             await query.edit_message_text(
-                f"❌ *Erro ao executar swap*\n\n`{resultado['erro']}`",
+                f"❌ *Erro ao executar swap*\n\n`{resultado['erro']}`{detalhe_tx}",
                 parse_mode="Markdown"
             )
 

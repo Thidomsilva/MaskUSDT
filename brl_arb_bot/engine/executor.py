@@ -134,6 +134,43 @@ def _dex_priority() -> list[str]:
     return [p.strip().lower() for p in raw.split(",") if p.strip()]
 
 
+def _parse_float_env(nome: str, default: float) -> float:
+    raw = os.getenv(nome, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except Exception:
+        return default
+
+
+def _slippage_steps() -> list[str]:
+    """Lista de slippage (%) para tentativas de quote do 1inch."""
+    raw = os.getenv("SWAP_SLIPPAGE_STEPS", "0.5,1,2,3")
+    steps: list[float] = []
+    for item in raw.split(","):
+        t = item.strip().replace("%", "")
+        if not t:
+            continue
+        try:
+            val = float(t)
+            if val > 0:
+                steps.append(val)
+        except Exception:
+            continue
+
+    if not steps:
+        steps = [_parse_float_env("ONEINCH_SLIPPAGE", 1.0)]
+
+    # Remove duplicados preservando ordem.
+    unique: list[float] = []
+    for s in steps:
+        if s not in unique:
+            unique.append(s)
+
+    return [f"{s:g}" for s in unique]
+
+
 def _extrair_revert_reason(exc: Exception) -> str:
     msg = str(exc) or exc.__class__.__name__
     match = re.search(r"execution reverted(?::\s*(.*))?", msg, re.IGNORECASE)
@@ -279,6 +316,7 @@ async def buscar_rota_swap(
     token_to:   str,   # símbolo ex: "BRZ"
     amount_usd: float,
     wallet:     str,
+    slippage_pct: str | None = None,
 ) -> dict | None:
     """
     Consulta a 1inch para obter a melhor rota e os dados da transação.
@@ -301,7 +339,7 @@ async def buscar_rota_swap(
         "dst":              addr_to,
         "amount":           str(amount_wei),
         "from":             wallet,
-        "slippage":         "0.5",       # 0.5% slippage máximo
+        "slippage":         (slippage_pct or os.getenv("ONEINCH_SLIPPAGE", "1")),
         "disableEstimate":  "false",
         "allowPartialFill": "false",
     }
@@ -608,10 +646,25 @@ async def executar_swap(
     rota = None
     fonte = None
     diagnostico = []
+    slippage_steps = _slippage_steps()
 
     for dex in _dex_priority():
         if dex == "1inch":
-            rota = await buscar_rota_swap(chain_id, token_from, token_to, amount_usd, wallet)
+            rota = None
+            for sl in slippage_steps:
+                rota = await buscar_rota_swap(
+                    chain_id,
+                    token_from,
+                    token_to,
+                    amount_usd,
+                    wallet,
+                    slippage_pct=sl,
+                )
+                if rota and rota.get("tx"):
+                    rota["slippage"] = sl
+                    break
+                if rota and rota.get("erro"):
+                    diagnostico.append(f"1inch@{sl}%: {rota['erro']}")
         elif dex == "zerox":
             rota = await buscar_rota_swap_zerox(chain_id, token_from, token_to, amount_usd, wallet)
         elif dex == "jumper":
@@ -685,7 +738,11 @@ async def executar_swap(
                 }))
             except Exception:
                 gas_limite = 250000
-        tx["gas"] = gas_limite
+
+        gas_mult = _parse_float_env("TX_GAS_MULTIPLIER", 1.15)
+        if gas_mult < 1.0:
+            gas_mult = 1.0
+        tx["gas"] = int(gas_limite * gas_mult)
 
         # Compatível com redes EIP-1559 e legadas.
         if tx_data.get("maxFeePerGas") and tx_data.get("maxPriorityFeePerGas"):
@@ -716,6 +773,23 @@ async def executar_swap(
         tx_hash = w3.eth.send_raw_transaction(raw_tx)
         tx_hash_hex = tx_hash.hex()
 
+        receipt_timeout = int(_parse_float_env("SWAP_RECEIPT_TIMEOUT_SEC", 120))
+        receipt = w3.eth.wait_for_transaction_receipt(
+            tx_hash,
+            timeout=receipt_timeout,
+            poll_latency=2,
+        )
+        if int(receipt.get("status", 0)) != 1:
+            return {
+                "sucesso": False,
+                "erro": (
+                    "Transação revertida on-chain (status=0). "
+                    "Ajuste slippage/valor e tente novamente."
+                ),
+                "tx_hash": tx_hash_hex,
+                "explorer": f"https://polygonscan.com/tx/{tx_hash_hex}" if chain_id == 137 else tx_hash_hex,
+            }
+
         # Monta link do explorer
         explorers = {
             1:     f"https://etherscan.io/tx/{tx_hash_hex}",
@@ -724,7 +798,14 @@ async def executar_swap(
             8453:  f"https://basescan.org/tx/{tx_hash_hex}",
         }
 
-        logger.info(f"Swap executado: {tx_hash_hex} na rede {chain_id} via {fonte or 'desconhecida'}")
+        sl_info = rota.get("slippage")
+        if sl_info:
+            logger.info(
+                f"Swap executado: {tx_hash_hex} na rede {chain_id} "
+                f"via {fonte or 'desconhecida'} (slippage={sl_info}%)"
+            )
+        else:
+            logger.info(f"Swap executado: {tx_hash_hex} na rede {chain_id} via {fonte or 'desconhecida'}")
 
         return {
             "sucesso":  True,
