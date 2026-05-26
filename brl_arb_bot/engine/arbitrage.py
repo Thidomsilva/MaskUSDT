@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from config import (
     TOKENS, NETWORKS, PARES_MONITORADOS,
     MIN_SPREAD_PCT, MIN_LUCRO_USD,
-    SLIPPAGE_PCT, AMOUNT_USDT_PADRAO
+    SLIPPAGE_PCT, AMOUNT_USDT_PADRAO,
+    USD_QUOTES_PERMITIDAS,
 )
 from engine.prices import buscar_todos_precos, cotacao_usd_brl_atual, buscar_saldo_polygon
 from engine.executor import executar_swap
@@ -82,6 +83,10 @@ async def detectar_oportunidades(
         rede_nome   = NETWORKS[chain_id]["name"]
 
         for token_brl, token_usd in pares:
+            # Permite restringir monitoramento para uma quote USD específica (ex.: só USDT).
+            if token_usd in TOKENS_USD and token_usd not in USD_QUOTES_PERMITIDAS:
+                continue
+
             preco_brl = precos_rede.get(token_brl)
             preco_usd = precos_rede.get(token_usd)
             if not preco_brl or not preco_usd:
@@ -158,20 +163,25 @@ async def detectar_oportunidades(
             amount_token_from = float(amount_usd)
 
             if saldos_rede:
-                saldo_token_from = float(saldos_rede.get(token_from) or 0)
-                if saldo_token_from <= 0:
-                    continue
+                saldo_raw = saldos_rede.get(token_from)
 
-                preco_token_from_usd = 1.0 if token_from in TOKENS_USD else float(precos_rede.get(token_from) or 0)
-                if preco_token_from_usd <= 0:
-                    continue
+                # Só aplica filtro estrito quando o saldo do token foi obtido com sucesso.
+                # Se RPC falhar e vier None, mantém fallback por AMOUNT_USDT_PADRAO.
+                if saldo_raw is not None:
+                    saldo_token_from = float(saldo_raw or 0)
+                    if saldo_token_from <= 0:
+                        continue
 
-                saldo_usd_equiv = saldo_token_from * preco_token_from_usd
-                amount_usd_equiv = min(float(amount_usd), saldo_usd_equiv)
-                if amount_usd_equiv < INVENTORY_MIN_USD:
-                    continue
+                    preco_token_from_usd = 1.0 if token_from in TOKENS_USD else float(precos_rede.get(token_from) or 0)
+                    if preco_token_from_usd <= 0:
+                        continue
 
-                amount_token_from = amount_usd_equiv / preco_token_from_usd
+                    saldo_usd_equiv = saldo_token_from * preco_token_from_usd
+                    amount_usd_equiv = min(float(amount_usd), saldo_usd_equiv)
+                    if amount_usd_equiv < INVENTORY_MIN_USD:
+                        continue
+
+                    amount_token_from = amount_usd_equiv / preco_token_from_usd
 
             gas_usd      = estimar_gas_usd(chain_id)
             fee_swap_usd = estimar_fee_swap(chain_id, amount_usd_equiv)
@@ -218,7 +228,16 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                 try:
                     saldos_polygon = await buscar_saldo_polygon(dex_address)
                     if isinstance(saldos_polygon, dict):
-                        saldos_por_chain[137] = saldos_polygon
+                        tem_saldo_confiavel = any(
+                            saldos_polygon.get(sym) is not None
+                            for sym in (*TOKENS_USD, *TOKENS_BRL)
+                        )
+                        if not tem_saldo_confiavel:
+                            logger.warning(
+                                f"[uid={telegram_id}] Saldos indisponíveis via RPC; seguindo scanner sem filtro de saldo."
+                            )
+                        else:
+                            saldos_por_chain[137] = saldos_polygon
                 except Exception as e:
                     logger.warning(f"[uid={telegram_id}] Falha ao consultar saldo da Polygon: {e}")
 

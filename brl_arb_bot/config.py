@@ -17,6 +17,8 @@ Pares: TODOS contra TODOS onde houver liquidez
   BRLA ↔ BRL1              ← novo
 """
 
+import os
+
 # ─── Redes suportadas ─────────────────────────────────────────────────────────
 NETWORKS = {
     1: {
@@ -127,6 +129,13 @@ MIN_LUCRO_USD      = 0.30   # lucro líquido mínimo em USD para alertar
 SLIPPAGE_PCT       = 0.3    # slippage máximo tolerado (%)
 AMOUNT_USDT_PADRAO = 100    # tamanho padrão de simulação (USD equivalente)
 INTERVALO_SCAN_SEG = 15     # intervalo entre scans em segundos
+
+# Filtro opcional de quotes USD para monitoramento.
+# Ex.: USD_QUOTES_PERMITIDAS=USDT para operar apenas pares contra USDT.
+_quotes_env = os.getenv("USD_QUOTES_PERMITIDAS", "USDT,USDC,DAI")
+USD_QUOTES_PERMITIDAS = {
+    q.strip().upper() for q in _quotes_env.split(",") if q.strip()
+}
 
 # ─── Notas de liquidez (referência para ajuste de amount) ────────────────────
 # Polygon BRZ/USDT pool:  ~$41k liquidez  (Uniswap V4)
