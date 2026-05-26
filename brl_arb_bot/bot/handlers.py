@@ -275,9 +275,12 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         amount_usd = payload["am"]
         spread_pct = payload["sp"]
         lucro_est  = payload["lu"]
+        par_exec   = f"{token_from} -> {token_to}"
 
         await query.edit_message_text(
-            query.message.text + "\n\n⏳ *Executando swap...*\n_Assinando transação e enviando para a rede._",
+            query.message.text + "\n\n⏳ *Executando swap...*\n"
+            f"Par de execução: `{par_exec}`\n"
+            "_Assinando transação e enviando para a rede._",
             parse_mode="Markdown"
         )
 
