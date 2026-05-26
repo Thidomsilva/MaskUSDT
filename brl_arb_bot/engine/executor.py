@@ -5,6 +5,7 @@ Chamado quando o aluno clica em 'Executar agora' no Telegram.
 
 import logging
 import os
+import re
 import aiohttp
 from web3 import Web3
 from config import TOKENS, NETWORKS
@@ -75,6 +76,30 @@ ERC20_DECIMALS_ABI = [{
     "type": "function",
 }]
 
+ERC20_BALANCE_ALLOWANCE_ABI = [
+    {
+        "constant": True,
+        "inputs": [{"name": "owner", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "payable": False,
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
+        "constant": True,
+        "inputs": [
+            {"name": "owner", "type": "address"},
+            {"name": "spender", "type": "address"},
+        ],
+        "name": "allowance",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "payable": False,
+        "stateMutability": "view",
+        "type": "function",
+    },
+]
+
 
 def _oneinch_headers() -> dict:
     headers = {"Accept": "application/json"}
@@ -107,6 +132,111 @@ def _dex_priority() -> list[str]:
     """Ordem de tentativa dos adapters de execução."""
     raw = os.getenv("DEX_PRIORITY", "1inch,zerox,jumper,oku,llama")
     return [p.strip().lower() for p in raw.split(",") if p.strip()]
+
+
+def _extrair_revert_reason(exc: Exception) -> str:
+    msg = str(exc) or exc.__class__.__name__
+    match = re.search(r"execution reverted(?::\s*(.*))?", msg, re.IGNORECASE)
+    if match:
+        detalhe = (match.group(1) or "").strip(" '")
+        return detalhe or "execution reverted"
+    return msg[:220]
+
+
+def _normalizar_endereco(addr: str | None) -> str | None:
+    if not addr:
+        return None
+    try:
+        return Web3.to_checksum_address(addr)
+    except Exception:
+        return None
+
+
+def _to_wei_amount(chain_id: int, token_symbol: str, amount_usd: float) -> int:
+    token_addr = TOKENS.get(chain_id, {}).get(token_symbol)
+    if not token_addr:
+        return 0
+    decimais = _token_decimais(chain_id, token_addr)
+    return int(amount_usd * (10 ** decimais))
+
+
+def _checar_pretrade_erc20(
+    w3: Web3,
+    chain_id: int,
+    wallet: str,
+    token_from: str,
+    amount_wei: int,
+    spender: str | None,
+) -> str | None:
+    token_addr = TOKENS.get(chain_id, {}).get(token_from)
+    if not token_addr:
+        return f"Token {token_from} não mapeado na rede {chain_id}."
+
+    try:
+        owner = Web3.to_checksum_address(wallet)
+        token = w3.eth.contract(
+            address=Web3.to_checksum_address(token_addr),
+            abi=ERC20_BALANCE_ALLOWANCE_ABI,
+        )
+        saldo = int(token.functions.balanceOf(owner).call())
+        if saldo < amount_wei:
+            return (
+                f"Saldo insuficiente de {token_from} para o swap "
+                f"(saldo={saldo}, necessário={amount_wei})."
+            )
+
+        if spender:
+            allow = int(token.functions.allowance(owner, Web3.to_checksum_address(spender)).call())
+            if allow < amount_wei:
+                return (
+                    f"Allowance insuficiente de {token_from} para o contrato {spender}. "
+                    f"Aprove o token antes de executar (allowance={allow}, necessário={amount_wei})."
+                )
+    except Exception as exc:
+        logger.warning(f"Falha na pré-checagem ERC20: {exc}")
+
+    return None
+
+
+def _checar_saldo_gas(
+    w3: Web3,
+    account_addr: str,
+    tx: dict,
+) -> str | None:
+    try:
+        saldo_native = int(w3.eth.get_balance(account_addr))
+        gas = int(tx.get("gas", 0) or 0)
+        value = int(tx.get("value", 0) or 0)
+        if tx.get("maxFeePerGas"):
+            preco_gas = int(tx["maxFeePerGas"])
+        else:
+            preco_gas = int(tx.get("gasPrice", 0) or 0)
+
+        custo_max = value + gas * preco_gas
+        if saldo_native < custo_max:
+            return (
+                "Saldo insuficiente de token nativo para gas/value. "
+                f"Saldo={saldo_native}, custo_estimado={custo_max}."
+            )
+    except Exception as exc:
+        logger.warning(f"Falha na checagem de saldo de gas: {exc}")
+
+    return None
+
+
+def _simular_tx_call(w3: Web3, tx: dict) -> str | None:
+    """Simula a execução para capturar revert antes de enviar tx real."""
+    try:
+        call_tx = {
+            "from": tx["from"],
+            "to": tx["to"],
+            "data": tx["data"],
+            "value": tx.get("value", 0),
+        }
+        w3.eth.call(call_tx, "pending")
+    except Exception as exc:
+        return _extrair_revert_reason(exc)
+    return None
 
 
 def _rpc_web3(chain_id: int) -> Web3:
@@ -253,7 +383,8 @@ async def buscar_rota_swap_zerox(
                 if tx_raw.get("maxPriorityFeePerGas"):
                     tx["maxPriorityFeePerGas"] = str(tx_raw.get("maxPriorityFeePerGas"))
 
-                return {"tx": tx, "fonte": "0x"}
+                spender = data.get("allowanceTarget") or tx_raw.get("to")
+                return {"tx": tx, "fonte": "0x", "spender": spender}
     except Exception as e:
         logger.error(f"Erro ao buscar rota 0x: {e}")
         return _erro_dex(str(e))
@@ -318,7 +449,9 @@ async def buscar_rota_swap_jumper(
                 if tx_raw.get("maxPriorityFeePerGas"):
                     tx["maxPriorityFeePerGas"] = str(tx_raw.get("maxPriorityFeePerGas"))
 
-                return {"tx": tx, "fonte": "jumper", "raw": data}
+                estimate = data.get("estimate") or {}
+                spender = estimate.get("approvalAddress") or tx_raw.get("to")
+                return {"tx": tx, "fonte": "jumper", "raw": data, "spender": spender}
     except Exception as e:
         logger.error(f"Erro ao buscar rota Jumper: {e}")
         return _erro_dex(str(e))
@@ -349,7 +482,7 @@ async def buscar_rota_swap_oku(
         "inTokenAddress": addr_from,
         "outTokenAddress": addr_to,
         "inTokenAmount": str(amount_usd),
-        "slippage": int(os.getenv("OKU_SLIPPAGE_BPS", "50")),
+        "slippage": _parse_int_value(os.getenv("OKU_SLIPPAGE_BPS", "50"), 50),
     }
 
     try:
@@ -376,7 +509,9 @@ async def buscar_rota_swap_oku(
                     "value": str(tx_raw.get("value", "0")),
                 }
 
-                return {"tx": tx, "fonte": "oku", "raw": data}
+                approval = data.get("executionInfo", {}).get("approval") or {}
+                spender = approval.get("allowanceTarget") or tx_raw.get("to")
+                return {"tx": tx, "fonte": "oku", "raw": data, "spender": spender}
     except Exception as e:
         logger.error(f"Erro ao buscar rota Oku: {e}")
         return _erro_dex(str(e))
@@ -443,7 +578,8 @@ async def buscar_rota_swap_llama(
                 if tx_raw.get("maxPriorityFeePerGas"):
                     tx["maxPriorityFeePerGas"] = str(tx_raw.get("maxPriorityFeePerGas"))
 
-                return {"tx": tx, "fonte": "llama", "raw": data}
+                spender = data.get("allowanceTarget") or tx_raw.get("to")
+                return {"tx": tx, "fonte": "llama", "raw": data, "spender": spender}
     except Exception as e:
         logger.error(f"Erro ao buscar rota LlamaSwap: {e}")
         return _erro_dex(str(e))
@@ -505,6 +641,9 @@ async def executar_swap(
     if not tx_data:
         return {"sucesso": False, "erro": "Resposta inválida da DEX (sem campo tx)."}
 
+    spender = _normalizar_endereco(rota.get("spender") or tx_data.get("to"))
+    amount_wei = _to_wei_amount(chain_id, token_from, amount_usd)
+
     # 2. Conecta na rede
     w3 = _rpc_web3(chain_id)
 
@@ -520,9 +659,20 @@ async def executar_swap(
             "to":       Web3.to_checksum_address(tx_data["to"]),
             "data":     tx_data["data"],
             "value":    _parse_int_value(tx_data.get("value", 0)),
-            "nonce":    w3.eth.get_transaction_count(account.address),
+            "nonce":    w3.eth.get_transaction_count(account.address, "pending"),
             "chainId":  chain_id,
         }
+
+        erro_pretrade = _checar_pretrade_erc20(
+            w3=w3,
+            chain_id=chain_id,
+            wallet=account.address,
+            token_from=token_from,
+            amount_wei=amount_wei,
+            spender=spender,
+        )
+        if erro_pretrade:
+            return {"sucesso": False, "erro": erro_pretrade}
 
         gas_limite = _parse_int_value(tx_data.get("gas", 0))
         if gas_limite <= 0:
@@ -545,6 +695,17 @@ async def executar_swap(
             tx["gasPrice"] = _parse_int_value(tx_data["gasPrice"])
         else:
             tx["gasPrice"] = int(w3.eth.gas_price)
+
+        erro_saldo = _checar_saldo_gas(w3, account.address, tx)
+        if erro_saldo:
+            return {"sucesso": False, "erro": erro_saldo}
+
+        revert = _simular_tx_call(w3, tx)
+        if revert:
+            return {
+                "sucesso": False,
+                "erro": f"Simulação on-chain falhou antes do envio: {revert}",
+            }
 
         # 3. Assina localmente
         signed = w3.eth.account.sign_transaction(tx, private_key)
