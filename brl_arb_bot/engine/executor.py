@@ -11,6 +11,15 @@ from config import TOKENS, NETWORKS
 
 logger = logging.getLogger(__name__)
 
+# RPCs com fallback ordenados por confiabilidade (testados mai/2026)
+_RPCS_FALLBACK: dict[int, list[str]] = {
+    137: [
+        "https://polygon-bor-rpc.publicnode.com",   # ✅ principal
+        "https://polygon.gateway.tenderly.co",
+        "https://polygon.drpc.org",
+    ],
+}
+
 ONEINCH_SWAP_URL = "https://api.1inch.dev/swap/v6.0/{chain_id}/swap"
 ZEROX_QUOTE_URL = "https://api.0x.org/swap/allowance-holder/quote"
 JUMPER_QUOTE_URL = "https://li.quest/v1/quote"
@@ -77,8 +86,22 @@ def _dex_priority() -> list[str]:
 
 
 def _rpc_web3(chain_id: int) -> Web3:
-    rpc_url = NETWORKS[chain_id]["rpc"]
-    return Web3(Web3.HTTPProvider(rpc_url))
+    """Tenta RPCs em ordem; retorna o primeiro conectado (fallback seguro)."""
+    urls: list[str] = []
+    primary = NETWORKS[chain_id]["rpc"]
+    urls.append(primary)
+    for r in _RPCS_FALLBACK.get(chain_id, []):
+        if r not in urls:
+            urls.append(r)
+    for url in urls:
+        try:
+            w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": 8}))
+            if w3.is_connected():
+                return w3
+        except Exception:
+            continue
+    # último recurso — retorna sem verificar; chamador vai receber erro explícito
+    return Web3(Web3.HTTPProvider(urls[0]))
 
 
 def _token_decimais(chain_id: int, token_address: str) -> int:

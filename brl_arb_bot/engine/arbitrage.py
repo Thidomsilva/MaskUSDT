@@ -100,8 +100,26 @@ async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list
                     continue
             # Para BRL/BRL: comparar emissor vs emissor (paridade ideal 1:1).
             elif token_brl in TOKENS_BRL and token_usd in TOKENS_BRL:
+                # Ambos devem ter preço USD plausível para BRL
+                if not (BRL_PRECO_MIN_USD <= preco_brl <= BRL_PRECO_MAX_USD):
+                    logger.debug(
+                        f"[{token_brl}] preço {preco_brl:.6f} USD fora do range plausível — ignorado"
+                    )
+                    continue
+                if not (BRL_PRECO_MIN_USD <= preco_usd <= BRL_PRECO_MAX_USD):
+                    logger.debug(
+                        f"[{token_usd}] preço {preco_usd:.6f} USD fora do range plausível — ignorado"
+                    )
+                    continue
                 denom = max(preco_brl, preco_usd)
                 spread_pct = abs(preco_brl - preco_usd) / denom * 100 if denom > 0 else 0
+                # Dois emissores BRL nunca devem divergir > MAX_SPREAD_BRL_USD_PCT
+                if spread_pct > MAX_SPREAD_BRL_USD_PCT:
+                    logger.debug(
+                        f"[{token_brl}/{token_usd}] spread {spread_pct:.2f}% "
+                        f"> cap {MAX_SPREAD_BRL_USD_PCT}% — descartado (possível erro de API)"
+                    )
+                    continue
             else:
                 spread_pct = abs(preco_brl - preco_usd) / preco_usd * 100
 
