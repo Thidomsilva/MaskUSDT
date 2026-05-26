@@ -12,7 +12,7 @@ from config import (
     MIN_SPREAD_PCT, MIN_LUCRO_USD,
     SLIPPAGE_PCT, AMOUNT_USDT_PADRAO
 )
-from engine.prices import buscar_todos_precos, cotacao_usd_brl_atual
+from engine.prices import buscar_todos_precos, cotacao_usd_brl_atual, buscar_saldo_polygon
 from engine.executor import executar_swap
 from vault.vault import get_user, registrar_operacao
 
@@ -22,6 +22,7 @@ AUTO_COOLDOWN_SEG = int(os.getenv("AUTO_COOLDOWN_SEG", "45"))
 MANUAL_ALERT_COOLDOWN_SEG = int(os.getenv("MANUAL_ALERT_COOLDOWN_SEG", "45"))
 TOKENS_USD = {"USDT", "USDC", "DAI"}
 TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
+INVENTORY_MIN_USD = float(os.getenv("INVENTORY_MIN_USD", "5"))
 
 
 @dataclass
@@ -40,6 +41,7 @@ class Oportunidade:
     token_from:   str
     token_to:     str
     amount_usd:   float
+    amount_usd_equiv: float
 
 
 # Gas estimado por rede (units × gwei × eth_price)
@@ -66,7 +68,10 @@ def estimar_fee_swap(chain_id: int, amount_usd: float) -> float:
     return amount_usd * FEE_POOL.get(chain_id, 0.05) / 100
 
 
-async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list[Oportunidade]:
+async def detectar_oportunidades(
+    amount_usd: float = AMOUNT_USDT_PADRAO,
+    saldos_por_chain: dict[int, dict[str, float]] | None = None,
+) -> list[Oportunidade]:
     precos = await buscar_todos_precos()
     usd_brl = await cotacao_usd_brl_atual()
     preco_brl_teorico_usd = 1.0 / usd_brl if usd_brl > 0 else 0.2
@@ -126,18 +131,6 @@ async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list
             if spread_pct < MIN_SPREAD_PCT:
                 continue
 
-            gas_usd      = estimar_gas_usd(chain_id)
-            fee_swap_usd = estimar_fee_swap(chain_id, amount_usd)
-            slippage_usd = amount_usd * SLIPPAGE_PCT / 100
-            lucro_usd    = amount_usd * spread_pct / 100 - gas_usd - fee_swap_usd - slippage_usd
-
-            # Spread só existe quando o resultado líquido é positivo
-            if lucro_usd <= 0:
-                continue
-
-            if lucro_usd < MIN_LUCRO_USD:
-                continue
-
             if token_brl in TOKENS_BRL and token_usd in TOKENS_USD:
                 if preco_brl < preco_brl_teorico_usd:
                     token_from, token_to = token_usd, token_brl
@@ -160,6 +153,37 @@ async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list
                     token_from, token_to = token_brl, token_usd
                     direcao = f"Compra {token_usd} → Vende {token_brl}"
 
+            saldos_rede = (saldos_por_chain or {}).get(chain_id) or {}
+            amount_usd_equiv = float(amount_usd)
+            amount_token_from = float(amount_usd)
+
+            if saldos_rede:
+                saldo_token_from = float(saldos_rede.get(token_from) or 0)
+                if saldo_token_from <= 0:
+                    continue
+
+                preco_token_from_usd = 1.0 if token_from in TOKENS_USD else float(precos_rede.get(token_from) or 0)
+                if preco_token_from_usd <= 0:
+                    continue
+
+                saldo_usd_equiv = saldo_token_from * preco_token_from_usd
+                amount_usd_equiv = min(float(amount_usd), saldo_usd_equiv)
+                if amount_usd_equiv < INVENTORY_MIN_USD:
+                    continue
+
+                amount_token_from = amount_usd_equiv / preco_token_from_usd
+
+            gas_usd      = estimar_gas_usd(chain_id)
+            fee_swap_usd = estimar_fee_swap(chain_id, amount_usd_equiv)
+            slippage_usd = amount_usd_equiv * SLIPPAGE_PCT / 100
+            lucro_usd    = amount_usd_equiv * spread_pct / 100 - gas_usd - fee_swap_usd - slippage_usd
+
+            if lucro_usd <= 0:
+                continue
+
+            if lucro_usd < MIN_LUCRO_USD:
+                continue
+
             oportunidades.append(Oportunidade(
                 chain_id=chain_id, rede=rede_nome,
                 token_brl=token_brl, token_usd=token_usd,
@@ -167,7 +191,8 @@ async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list
                 spread_pct=spread_pct, fee_swap_usd=fee_swap_usd,
                 gas_usd=gas_usd, lucro_usd=lucro_usd,
                 direcao=direcao, token_from=token_from, token_to=token_to,
-                amount_usd=amount_usd,
+                amount_usd=amount_token_from,
+                amount_usd_equiv=amount_usd_equiv,
             ))
 
     oportunidades.sort(key=lambda o: o.lucro_usd, reverse=True)
@@ -181,14 +206,25 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
     logger.info(f"[uid={telegram_id}] Loop iniciado.")
     while bot_data.get(f"running_{telegram_id}", False):
         try:
-            oportunidades = await detectar_oportunidades()
+            user = get_user(telegram_id, include_pk=True)
+            if not user:
+                logger.warning(f"[uid={telegram_id}] Usuário não encontrado no vault, encerrando loop.")
+                bot_data[f"running_{telegram_id}"] = False
+                break
+
+            saldos_por_chain = {}
+            dex_address = user.get("dex_address")
+            if dex_address:
+                try:
+                    saldos_polygon = await buscar_saldo_polygon(dex_address)
+                    if isinstance(saldos_polygon, dict):
+                        saldos_por_chain[137] = saldos_polygon
+                except Exception as e:
+                    logger.warning(f"[uid={telegram_id}] Falha ao consultar saldo da Polygon: {e}")
+
+            oportunidades = await detectar_oportunidades(saldos_por_chain=saldos_por_chain)
             if oportunidades:
                 melhor = oportunidades[0]
-                user = get_user(telegram_id, include_pk=True)
-                if not user:
-                    logger.warning(f"[uid={telegram_id}] Usuário não encontrado no vault, encerrando loop.")
-                    bot_data[f"running_{telegram_id}"] = False
-                    break
 
                 modo = user.get("trading_mode", "manual")
                 token_from = melhor.token_from
@@ -274,6 +310,7 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                                     "✅ *Swap executado automaticamente!*\n\n"
                                     f"Rede: `{melhor.rede}`\n"
                                     f"Par: `{par_exec}`\n"
+                                    f"Operação: `{melhor.amount_usd:.6f} {token_from}` (~`${melhor.amount_usd_equiv:.2f}`)\n"
                                     f"🟢 Spread: `{melhor.spread_pct:.3f}%`\n"
                                     f"🟡 Lucro est.: `${melhor.lucro_usd:.4f}`\n\n"
                                     f"🔗 [Ver no explorer]({explorer})"
