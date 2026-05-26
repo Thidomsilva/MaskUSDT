@@ -70,6 +70,11 @@ def _texto_modo(modo: str) -> str:
 
 
 def _resolver_tokens_execucao(oport) -> tuple[str, str]:
+    token_from = getattr(oport, "token_from", None)
+    token_to = getattr(oport, "token_to", None)
+    if token_from and token_to:
+        return token_from, token_to
+
     if oport.preco_brl < oport.preco_usd:
         return oport.token_usd, oport.token_brl
     return oport.token_brl, oport.token_usd

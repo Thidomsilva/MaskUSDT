@@ -381,6 +381,25 @@ async def cotacao_usd_brl(session: aiohttp.ClientSession) -> float:
         return 5.0  # fallback conservador
 
 
+async def cotacao_usd_brl_atual() -> float:
+    """Obtém USD/BRL em chamada isolada (fora do scanner principal)."""
+    async with aiohttp.ClientSession() as session:
+        return await cotacao_usd_brl(session)
+
+
+def _normalizar_preco(preco: float | None) -> float | None:
+    """Descarta preços inválidos (ex.: -1 de APIs sem suporte)."""
+    if preco is None:
+        return None
+    try:
+        valor = float(preco)
+    except Exception:
+        return None
+    if valor <= 0:
+        return None
+    return valor
+
+
 # ─── Scanner principal ────────────────────────────────────────────────────────
 
 async def buscar_todos_precos() -> dict:
@@ -424,25 +443,25 @@ async def buscar_todos_precos() -> dict:
                 return chain_id, simbolo, 1.0
 
             # Tenta 1inch primeiro, fallback GeckoTerminal
-            preco = await preco_1inch(session, chain_id, address)
+            preco = _normalizar_preco(await preco_1inch(session, chain_id, address))
 
             if not preco and usd_address:
-                preco = await preco_jumper(session, chain_id, address, usd_symbol, usd_address)
+                preco = _normalizar_preco(await preco_jumper(session, chain_id, address, usd_symbol, usd_address))
 
             if not preco:
-                preco = await preco_oku_oracle(session, chain_id, address)
+                preco = _normalizar_preco(await preco_oku_oracle(session, chain_id, address))
 
             if not preco and usd_address:
-                preco = await preco_zerox(session, chain_id, address, usd_symbol, usd_address)
+                preco = _normalizar_preco(await preco_zerox(session, chain_id, address, usd_symbol, usd_address))
 
             if not preco and usd_address:
-                preco = await preco_odos(session, chain_id, address, usd_symbol, usd_address)
+                preco = _normalizar_preco(await preco_odos(session, chain_id, address, usd_symbol, usd_address))
 
             if not preco:
-                preco = await preco_llama(session, chain_id, address)
+                preco = _normalizar_preco(await preco_llama(session, chain_id, address))
 
             if not preco:
-                preco = await preco_gecko(session, chain_id, address)
+                preco = _normalizar_preco(await preco_gecko(session, chain_id, address))
 
             return chain_id, simbolo, preco
 

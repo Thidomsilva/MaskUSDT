@@ -12,7 +12,7 @@ from config import (
     MIN_SPREAD_PCT, MIN_LUCRO_USD,
     SLIPPAGE_PCT, AMOUNT_USDT_PADRAO
 )
-from engine.prices import buscar_todos_precos
+from engine.prices import buscar_todos_precos, cotacao_usd_brl_atual
 from engine.executor import executar_swap
 from vault.vault import get_user, registrar_operacao
 
@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 AUTO_COOLDOWN_SEG = int(os.getenv("AUTO_COOLDOWN_SEG", "45"))
 MANUAL_ALERT_COOLDOWN_SEG = int(os.getenv("MANUAL_ALERT_COOLDOWN_SEG", "45"))
+TOKENS_USD = {"USDT", "USDC"}
+TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
 
 
 @dataclass
@@ -35,6 +37,8 @@ class Oportunidade:
     gas_usd:      float
     lucro_usd:    float
     direcao:      str
+    token_from:   str
+    token_to:     str
     amount_usd:   float
 
 
@@ -57,6 +61,8 @@ def estimar_fee_swap(chain_id: int, amount_usd: float) -> float:
 
 async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list[Oportunidade]:
     precos = await buscar_todos_precos()
+    usd_brl = await cotacao_usd_brl_atual()
+    preco_brl_teorico_usd = 1.0 / usd_brl if usd_brl > 0 else 0.2
     oportunidades = []
 
     for chain_id, pares in PARES_MONITORADOS.items():
@@ -69,7 +75,16 @@ async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list
             if not preco_brl or not preco_usd:
                 continue
 
-            spread_pct   = abs(preco_brl - preco_usd) / preco_usd * 100
+            # Para BRL/USD: medir desvio da paridade cambial (evita falso 80%+ constante).
+            if token_brl in TOKENS_BRL and token_usd in TOKENS_USD:
+                spread_pct = abs(preco_brl - preco_brl_teorico_usd) / preco_brl_teorico_usd * 100
+            # Para BRL/BRL: comparar emissor vs emissor (paridade ideal 1:1).
+            elif token_brl in TOKENS_BRL and token_usd in TOKENS_BRL:
+                denom = max(preco_brl, preco_usd)
+                spread_pct = abs(preco_brl - preco_usd) / denom * 100 if denom > 0 else 0
+            else:
+                spread_pct = abs(preco_brl - preco_usd) / preco_usd * 100
+
             if spread_pct < MIN_SPREAD_PCT:
                 continue
 
@@ -81,11 +96,27 @@ async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list
             if lucro_usd < MIN_LUCRO_USD:
                 continue
 
-            direcao = (
-                f"Compra {token_brl} → Vende {token_usd}"
-                if preco_brl < preco_usd
-                else f"Compra {token_usd} → Vende {token_brl}"
-            )
+            if token_brl in TOKENS_BRL and token_usd in TOKENS_USD:
+                if preco_brl < preco_brl_teorico_usd:
+                    token_from, token_to = token_usd, token_brl
+                    direcao = f"Compra {token_brl} → Vende {token_usd}"
+                else:
+                    token_from, token_to = token_brl, token_usd
+                    direcao = f"Compra {token_usd} → Vende {token_brl}"
+            elif token_brl in TOKENS_BRL and token_usd in TOKENS_BRL:
+                if preco_brl < preco_usd:
+                    token_from, token_to = token_usd, token_brl
+                    direcao = f"Compra {token_brl} → Vende {token_usd}"
+                else:
+                    token_from, token_to = token_brl, token_usd
+                    direcao = f"Compra {token_usd} → Vende {token_brl}"
+            else:
+                if preco_brl < preco_usd:
+                    token_from, token_to = token_usd, token_brl
+                    direcao = f"Compra {token_brl} → Vende {token_usd}"
+                else:
+                    token_from, token_to = token_brl, token_usd
+                    direcao = f"Compra {token_usd} → Vende {token_brl}"
 
             oportunidades.append(Oportunidade(
                 chain_id=chain_id, rede=rede_nome,
@@ -93,7 +124,8 @@ async def detectar_oportunidades(amount_usd: float = AMOUNT_USDT_PADRAO) -> list
                 preco_brl=preco_brl, preco_usd=preco_usd,
                 spread_pct=spread_pct, fee_swap_usd=fee_swap_usd,
                 gas_usd=gas_usd, lucro_usd=lucro_usd,
-                direcao=direcao, amount_usd=amount_usd,
+                direcao=direcao, token_from=token_from, token_to=token_to,
+                amount_usd=amount_usd,
             ))
 
     oportunidades.sort(key=lambda o: o.lucro_usd, reverse=True)
@@ -117,8 +149,8 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                     break
 
                 modo = user.get("trading_mode", "manual")
-                token_from = melhor.token_usd if melhor.preco_brl < melhor.preco_usd else melhor.token_brl
-                token_to = melhor.token_brl if melhor.preco_brl < melhor.preco_usd else melhor.token_usd
+                token_from = melhor.token_from
+                token_to = melhor.token_to
                 par_exec = f"{token_from}/{token_to}"
 
                 if modo == "auto":
