@@ -334,10 +334,16 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             pol  = saldos.get("POL")
             usdt = saldos.get("USDT")
             usdc = saldos.get("USDC")
+            brz  = saldos.get("BRZ")
+            brla = saldos.get("BRLA")
+            brl1 = saldos.get("BRL1")
             linhas = []
-            if pol  is not None: linhas.append(f"  • POL:  `{pol:.4f}`")
-            if usdt is not None: linhas.append(f"  • USDT: `{usdt:.2f}`")
-            if usdc is not None: linhas.append(f"  • USDC: `{usdc:.2f}`")
+            if pol  is not None: linhas.append(f"  • POL:   `{pol:.4f}`")
+            if usdt is not None: linhas.append(f"  • USDT:  `{usdt:.2f}`")
+            if usdc is not None: linhas.append(f"  • USDC:  `{usdc:.2f}`")
+            if brz  is not None: linhas.append(f"  • BRZ:   `{brz:.2f}`")
+            if brla is not None: linhas.append(f"  • BRLA:  `{brla:.2f}`")
+            if brl1 is not None: linhas.append(f"  • BRL1:  `{brl1:.2f}`")
             saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
         except Exception:
             saldo_txt = "_indisponível_"

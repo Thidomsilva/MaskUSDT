@@ -191,9 +191,12 @@ async def _mostrar_carteira(query, user: dict):
     try:
         saldos = await buscar_saldo_polygon(addr)
         linhas = []
-        if saldos.get("POL")  is not None: linhas.append(f"  • POL:  `{saldos['POL']:.4f}`")
-        if saldos.get("USDT") is not None: linhas.append(f"  • USDT: `{saldos['USDT']:.2f}`")
-        if saldos.get("USDC") is not None: linhas.append(f"  • USDC: `{saldos['USDC']:.2f}`")
+        if saldos.get("POL")  is not None: linhas.append(f"  • POL:   `{saldos['POL']:.4f}`")
+        if saldos.get("USDT") is not None: linhas.append(f"  • USDT:  `{saldos['USDT']:.2f}`")
+        if saldos.get("USDC") is not None: linhas.append(f"  • USDC:  `{saldos['USDC']:.2f}`")
+        if saldos.get("BRZ")  is not None: linhas.append(f"  • BRZ:   `{saldos['BRZ']:.2f}`")
+        if saldos.get("BRLA") is not None: linhas.append(f"  • BRLA:  `{saldos['BRLA']:.2f}`")
+        if saldos.get("BRL1") is not None: linhas.append(f"  • BRL1:  `{saldos['BRL1']:.2f}`")
         saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
     except Exception:
         pass
@@ -204,7 +207,7 @@ async def _mostrar_carteira(query, user: dict):
             f"Endereço:\n`{addr}`\n\n"
             f"📍 *Polygon — Saldo atual:*\n{saldo_txt}\n\n"
             f"ℹ️ Para operar:\n"
-            f"  • *USDT* — capital de trade\n"
+            f"  • *USDT/USDC* — capital de trade\n"
             f"  • *POL* — mínimo 5 POL para gas\n\n"
             f"{link_polygon}",
             parse_mode="Markdown",

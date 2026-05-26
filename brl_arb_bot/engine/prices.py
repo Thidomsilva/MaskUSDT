@@ -447,12 +447,15 @@ async def buscar_saldo_polygon(address: str) -> dict:
         return None
 
     loop = _asyncio.get_event_loop()
-    pol, usdt, usdc = await _asyncio.gather(
+    pol, usdt, usdc, brz, brla, brl1 = await _asyncio.gather(
         loop.run_in_executor(None, _saldo_nativo),
         loop.run_in_executor(None, _saldo_erc20, "USDT"),
         loop.run_in_executor(None, _saldo_erc20, "USDC"),
+        loop.run_in_executor(None, _saldo_erc20, "BRZ"),
+        loop.run_in_executor(None, _saldo_erc20, "BRLA"),
+        loop.run_in_executor(None, _saldo_erc20, "BRL1"),
     )
-    return {"POL": pol, "USDT": usdt, "USDC": usdc}
+    return {"POL": pol, "USDT": usdt, "USDC": usdc, "BRZ": brz, "BRLA": brla, "BRL1": brl1}
 
 
 def _normalizar_preco(preco: float | None) -> float | None:
