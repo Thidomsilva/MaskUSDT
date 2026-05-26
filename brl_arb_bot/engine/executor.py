@@ -58,6 +58,25 @@ def _resumir_erro_http(texto: str, limite: int = 140) -> str:
     return t[:limite] + ("..." if len(t) > limite else "")
 
 
+def _next_nonce_hint(erro_msg: str) -> int | None:
+    """Extrai dica de próximo nonce de mensagens RPC, quando disponível."""
+    if not erro_msg:
+        return None
+
+    padroes = [
+        r"next nonce\s*(?:is)?\s*(\d+)",
+        r"expected\s*(\d+)",
+    ]
+    for p in padroes:
+        m = re.search(p, erro_msg, re.IGNORECASE)
+        if m:
+            try:
+                return int(m.group(1))
+            except Exception:
+                return None
+    return None
+
+
 def _parse_int_value(valor, default: int = 0) -> int:
     """Converte números vindos de APIs que podem usar decimal ou hex."""
     if valor is None:
@@ -1090,13 +1109,46 @@ async def executar_swap(
                 "approve_explorers": approve_explorers,
             }
 
-        # 3. Assina localmente
-        signed = w3.eth.account.sign_transaction(tx, private_key)
+        # 3. Assina localmente e envia para a rede
+        nonce_retries = int(_parse_float_env("NONCE_RETRY_ATTEMPTS", 2))
+        if nonce_retries < 0:
+            nonce_retries = 0
 
-        # 4. Envia para a rede
-        # Compatível com web3.py v5 (rawTransaction) e v6+ (raw_transaction)
-        raw_tx = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
-        tx_hash = w3.eth.send_raw_transaction(raw_tx)
+        tx_hash = None
+        for tentativa in range(nonce_retries + 1):
+            try:
+                signed = w3.eth.account.sign_transaction(tx, private_key)
+
+                # Compatível com web3.py v5 (rawTransaction) e v6+ (raw_transaction)
+                raw_tx = getattr(signed, "raw_transaction", None) or getattr(signed, "rawTransaction", None)
+                tx_hash = w3.eth.send_raw_transaction(raw_tx)
+                break
+            except Exception as send_exc:
+                erro_envio = str(send_exc)
+                nonce_baixo = "nonce too low" in erro_envio.lower()
+                if not nonce_baixo or tentativa >= nonce_retries:
+                    raise
+
+                hint = _next_nonce_hint(erro_envio) or 0
+                try:
+                    nonce_pending = int(w3.eth.get_transaction_count(account.address, "pending"))
+                    nonce_latest = int(w3.eth.get_transaction_count(account.address, "latest"))
+                    nonce_atual = int(tx.get("nonce", 0))
+                    tx["nonce"] = max(nonce_atual + 1, nonce_pending, nonce_latest, hint)
+                except Exception:
+                    tx["nonce"] = max(int(tx.get("nonce", 0)) + 1, hint)
+
+                logger.warning(
+                    f"Nonce baixo no envio ({erro_envio}). Recalculando nonce={tx['nonce']} e tentando novamente."
+                )
+
+        if tx_hash is None:
+            return {
+                "sucesso": False,
+                "erro": "Falha ao enviar transação: tx_hash ausente após tentativas de nonce.",
+                "approve_explorers": approve_explorers,
+            }
+
         tx_hash_hex = tx_hash.hex()
 
         receipt_timeout = int(_parse_float_env("SWAP_RECEIPT_TIMEOUT_SEC", 120))
