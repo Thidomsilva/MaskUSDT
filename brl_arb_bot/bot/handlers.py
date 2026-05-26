@@ -30,7 +30,7 @@ def _modo_usuario(user: dict | None) -> str:
 
 def _teclado_start_novo() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Cadastrar", switch_inline_query_current_chat="/cadastrar")],
+        [InlineKeyboardButton("➕ Cadastrar", callback_data="start|cadastrar")],
     ])
 
 
@@ -255,6 +255,20 @@ async def cadastrar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return WAIT_ADDRESS
 
 
+async def cadastrar_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Entrada do fluxo de cadastro via botão inline no /start."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(
+        "📌 *Passo 1/2 — Endereço da carteira*\n\n"
+        "Crie uma carteira *dedicada exclusivamente ao bot*.\n"
+        "⚠️ *Nunca use sua MetaMask principal.*\n\n"
+        "Cole o endereço público (0x...):",
+        parse_mode="Markdown"
+    )
+    return WAIT_ADDRESS
+
+
 async def receber_address(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     address = update.message.text.strip()
     if not address.startswith("0x") or len(address) != 42:
@@ -410,7 +424,10 @@ async def ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 def get_conversation_handler():
     return ConversationHandler(
-        entry_points=[CommandHandler("cadastrar", cadastrar)],
+        entry_points=[
+            CommandHandler("cadastrar", cadastrar),
+            CallbackQueryHandler(cadastrar_callback, pattern=r"^start\|cadastrar$"),
+        ],
         states={
             WAIT_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_address)],
             WAIT_PK:      [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_pk)],
