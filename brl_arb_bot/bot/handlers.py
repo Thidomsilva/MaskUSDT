@@ -53,6 +53,7 @@ import json
 import logging
 import os
 import uuid
+from web3 import Web3
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -698,6 +699,24 @@ async def receber_pk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ Não encontrei o endereço da etapa anterior. Use /cadastrar novamente.",
         )
+        return ConversationHandler.END
+
+    # Segurança operacional: garante que endereço e private key são do mesmo dono.
+    try:
+        normalized_pk = pk if pk.startswith("0x") else f"0x{pk}"
+        addr_pk = Web3().eth.account.from_key(normalized_pk).address
+    except Exception:
+        await update.message.reply_text("❌ Private key inválida. Use /cadastrar novamente.")
+        return ConversationHandler.END
+
+    try:
+        if Web3.to_checksum_address(address) != Web3.to_checksum_address(addr_pk):
+            await update.message.reply_text(
+                "❌ Endereço e private key não correspondem. Use /cadastrar novamente com o mesmo par.",
+            )
+            return ConversationHandler.END
+    except Exception:
+        await update.message.reply_text("❌ Endereço inválido. Use /cadastrar novamente.")
         return ConversationHandler.END
 
     save_user(uid, username, address, pk)
