@@ -45,6 +45,13 @@ def _env_int(nome: str, default: int) -> int:
     except ValueError:
         return default
 
+
+def _env_bool(nome: str, default: bool = False) -> bool:
+    raw = os.getenv(nome)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
 # ─── Redes suportadas ─────────────────────────────────────────────────────────
 NETWORKS = {
     1: {
@@ -97,6 +104,12 @@ TOKENS = {
         "BRZ":  "0x4eD141110F6EeeAbA9A1df36d8c26f684d2475Dc",  # Transfero Polygon
         "BRLA": "0xE6A537a407488807F0bbeb0038B79004f19DDDFb",  # Avenia Polygon
         "BRL1": "0x5C067C80C00eCd2345B05E83A3e758eF799C40B5",  # BRL1 Consortium Polygon
+        # Core do Motor 2 (Crypto Chain)
+        "WETH": "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
+        "WBTC": "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6",
+        "MATIC": "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",  # WMATIC
+        "LINK": "0x53E0bca35eC356BD5ddDFebbD1Fc0fD03FaBad39",
+        "BNB":  "0x3BA4c387f786bFEE076A58914F5Bd38d668B42c3",  # Binance-Peg BNB
     },
     # Arbitrum
     42161: {
@@ -110,6 +123,11 @@ TOKENS = {
         "BRLA": "0xE9185Ee218cae427aF7B9764A011bb89FeA761B4",  # Stabull Base pool
     },
 }
+
+# Catálogo expandido do Motor 2 solicitado.
+# Obs: XRP/TRX/DOT/SOL ainda não entram no scanner por padrão até validação
+# de contratos wrapped + liquidez mínima + rota consistente de execução.
+CRYPTO_EXTRA_CATALOG = ["XRP", "TRX", "DOT", "SOL"]
 
 # ─── TODOS os pares monitorados por rede ──────────────────────────────────────
 #
@@ -148,6 +166,64 @@ PARES_MONITORADOS = {
     # Base: BRLA crescendo — ativar quando liquidez aumentar
     # 8453: [("BRLA", "USDC")],
 }
+
+
+CRYPTO_ENGINE_ENABLED = _env_bool("CRYPTO_ENGINE_ENABLED", False)
+CRYPTO_EXTRA_ENABLED = _env_bool("CRYPTO_EXTRA_ENABLED", False)
+
+# Core de monitoramento do Motor 2 (baixo risco operacional inicial)
+CRYPTO_PARES_CORE = {
+    137: [
+        ("WETH", "USDT"),
+        ("WETH", "USDC"),
+        ("WBTC", "USDT"),
+        ("WBTC", "USDC"),
+        ("MATIC", "USDT"),
+        ("MATIC", "USDC"),
+        ("LINK", "USDT"),
+        ("LINK", "USDC"),
+        ("BNB",  "USDT"),
+        ("BNB",  "USDC"),
+    ]
+}
+
+# Extras solicitados ficam preparados por flag; pares serão ativados após
+# validação de endereço wrapped + liquidez + execução nas DEXs.
+CRYPTO_PARES_EXTRA: dict[int, list[tuple[str, str]]] = {
+    137: []
+}
+
+
+def _merge_pairs(
+    base: dict[int, list[tuple[str, str]]],
+    extra: dict[int, list[tuple[str, str]]],
+) -> dict[int, list[tuple[str, str]]]:
+    merged: dict[int, list[tuple[str, str]]] = {
+        chain_id: list(pares) for chain_id, pares in base.items()
+    }
+    for chain_id, pares in extra.items():
+        merged.setdefault(chain_id, [])
+        merged[chain_id].extend(pares)
+    return merged
+
+
+def pares_por_estrategia(strategy: str) -> dict[int, list[tuple[str, str]]]:
+    """Retorna pares monitorados de acordo com a estratégia Atlas."""
+    s = (strategy or "stable").strip().lower()
+
+    crypto_pairs: dict[int, list[tuple[str, str]]] = {}
+    if CRYPTO_ENGINE_ENABLED:
+        crypto_pairs = {k: list(v) for k, v in CRYPTO_PARES_CORE.items()}
+        if CRYPTO_EXTRA_ENABLED:
+            crypto_pairs = _merge_pairs(crypto_pairs, CRYPTO_PARES_EXTRA)
+
+    if s == "crypto":
+        return crypto_pairs
+
+    if s == "hybrid":
+        return _merge_pairs(PARES_MONITORADOS, crypto_pairs)
+
+    return {k: list(v) for k, v in PARES_MONITORADOS.items()}
 
 # ─── Thresholds ───────────────────────────────────────────────────────────────
 MIN_SPREAD_PCT     = _env_float("MIN_SPREAD_PCT", 0.35)      # % mínimo bruto para calcular

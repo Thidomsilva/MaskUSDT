@@ -157,9 +157,14 @@ def _teclado_estrategia(estrategia_atual: str) -> InlineKeyboardMarkup:
 
 def _texto_estrategia(estrategia: str) -> str:
     if estrategia == "crypto":
-        detalhe = "Motor 2 (Crypto Chain) está em preparação; por enquanto não executa entradas de cripto."
+        detalhe = (
+            "Motor 2 (Crypto Chain): core pronto para monitorar WETH/WBTC/MATIC/LINK/BNB. "
+            "Ativação por flag `CRYPTO_ENGINE_ENABLED=true`."
+        )
     elif estrategia == "hybrid":
-        detalhe = "Roda o Motor 1 (Stable) e prepara integração do Motor 2 (Crypto)."
+        detalhe = (
+            "Combina Motor 1 (Stable) + Motor 2 (Crypto core, quando habilitado)."
+        )
     else:
         detalhe = "Motor 1 ativo: BRZ↔BRLA↔BRL1↔USDT↔USDC (menor risco)."
     return (
