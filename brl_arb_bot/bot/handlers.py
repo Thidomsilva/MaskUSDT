@@ -160,7 +160,7 @@ def _texto_estrategia(estrategia: str) -> str:
     if estrategia == "crypto":
         detalhe = (
             "Motor 2 (Crypto Chain): core pronto para monitorar WETH/WBTC/MATIC/LINK/BNB. "
-            "Ativação por flag `CRYPTO_ENGINE_ENABLED=true`."
+            "Ativo por padrão (desative com `CRYPTO_ENGINE_ENABLED=false`)."
         )
     elif estrategia == "hybrid":
         detalhe = (

@@ -474,7 +474,9 @@ def _normalizar_preco(preco: float | None) -> float | None:
 
 # ─── Scanner principal ────────────────────────────────────────────────────────
 
-async def buscar_todos_precos() -> dict:
+async def buscar_todos_precos(
+    pares_monitorados: dict[int, list[tuple[str, str]]] | None = None,
+) -> dict:
     """
     Varre todas as redes e retorna preços de todos os tokens monitorados.
     Retorna:
@@ -490,10 +492,12 @@ async def buscar_todos_precos() -> dict:
     """
     resultados = {}
 
+    pares_ativos = pares_monitorados or PARES_MONITORADOS
+
     async with aiohttp.ClientSession() as session:
         tasks = []
 
-        for chain_id, pares in PARES_MONITORADOS.items():
+        for chain_id, pares in pares_ativos.items():
             tokens_chain = TOKENS.get(chain_id, {})
             # Coleta tokens únicos desta rede
             tokens_necessarios = set()

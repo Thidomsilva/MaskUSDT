@@ -168,7 +168,8 @@ PARES_MONITORADOS = {
 }
 
 
-CRYPTO_ENGINE_ENABLED = _env_bool("CRYPTO_ENGINE_ENABLED", False)
+# Motor crypto ativo por padrão; pode ser desativado via env.
+CRYPTO_ENGINE_ENABLED = _env_bool("CRYPTO_ENGINE_ENABLED", True)
 CRYPTO_EXTRA_ENABLED = _env_bool("CRYPTO_EXTRA_ENABLED", False)
 
 # Core de monitoramento do Motor 2 (baixo risco operacional inicial)

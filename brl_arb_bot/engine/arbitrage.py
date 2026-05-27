@@ -96,12 +96,11 @@ async def detectar_oportunidades(
     saldos_por_chain: dict[int, dict[str, float]] | None = None,
     pares_monitorados: dict[int, list[tuple[str, str]]] | None = None,
 ) -> list[Oportunidade]:
-    precos = await buscar_todos_precos()
+    pares_ativos = pares_monitorados or PARES_MONITORADOS
+    precos = await buscar_todos_precos(pares_monitorados=pares_ativos)
     usd_brl = await cotacao_usd_brl_atual()
     preco_brl_teorico_usd = 1.0 / usd_brl if usd_brl > 0 else 0.2
     oportunidades = []
-
-    pares_ativos = pares_monitorados or PARES_MONITORADOS
 
     for chain_id, pares in pares_ativos.items():
         precos_rede = precos.get(chain_id, {})
