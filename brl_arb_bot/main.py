@@ -115,6 +115,7 @@ async def _post_init_config_menu(app) -> None:
         BotCommand("parar", "Pausar monitor"),
         BotCommand("status", "Ver status e saldos"),
         BotCommand("modo", "Alternar Manual/Auto"),
+        BotCommand("estrategia", "Stable/Crypto/Híbrido"),
         BotCommand("painel", "Abrir painel"),
         BotCommand("menu", "Mostrar atalhos"),
         BotCommand("historico", "Últimas operações"),

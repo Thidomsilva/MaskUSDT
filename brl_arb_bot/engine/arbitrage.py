@@ -236,6 +236,37 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                 bot_data[f"running_{telegram_id}"] = False
                 break
 
+            estrategia = (user.get("strategy") or "stable").strip().lower()
+            if estrategia == "crypto":
+                aviso_key = f"strategy_warn_crypto_{telegram_id}"
+                if not bot_data.get(aviso_key):
+                    await bot.send_message(
+                        chat_id=telegram_id,
+                        text=(
+                            "🚧 *Crypto Chain ainda em preparação*\n\n"
+                            "No momento o Motor 2 ainda não executa operações.\n"
+                            "Use /estrategia para voltar ao modo Stable ou Híbrido."
+                        ),
+                        parse_mode="Markdown",
+                    )
+                    bot_data[aviso_key] = True
+                await asyncio.sleep(intervalo)
+                continue
+
+            if estrategia == "hybrid":
+                aviso_key = f"strategy_warn_hybrid_{telegram_id}"
+                if not bot_data.get(aviso_key):
+                    await bot.send_message(
+                        chat_id=telegram_id,
+                        text=(
+                            "🧪 *Híbrido ativo (fase 1)*\n\n"
+                            "Por enquanto o Híbrido está operando o Motor Stable.\n"
+                            "O Motor Crypto será conectado nas próximas versões."
+                        ),
+                        parse_mode="Markdown",
+                    )
+                    bot_data[aviso_key] = True
+
             saldos_por_chain = {}
             dex_address = user.get("dex_address")
             if dex_address:

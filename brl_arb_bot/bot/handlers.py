@@ -69,7 +69,7 @@ from telegram.ext import (
 from vault.vault import (
     save_user, get_user,
     user_exists, historico_usuario, registrar_operacao,
-    set_user_trading_mode, is_admin,
+    set_user_trading_mode, set_user_strategy, is_admin,
 )
 from engine.arbitrage import loop_usuario
 from engine.executor import executar_swap
@@ -92,7 +92,8 @@ def _teclado_hamburger() -> ReplyKeyboardMarkup:
             [MENU_HAMBURGER],
             ["▶ Iniciar", "⏹ Parar"],
             ["📊 Status", "📋 Histórico"],
-            ["⚙️ Modo", "📱 Painel"],
+            ["⚙️ Modo", "🧭 Estratégia"],
+            ["📱 Painel"],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -102,6 +103,10 @@ def _teclado_hamburger() -> ReplyKeyboardMarkup:
 
 def _modo_usuario(user: dict | None) -> str:
     return (user or {}).get("trading_mode", "manual")
+
+
+def _estrategia_usuario(user: dict | None) -> str:
+    return (user or {}).get("strategy", "stable")
 
 
 def _teclado_start_novo() -> InlineKeyboardMarkup:
@@ -114,6 +119,7 @@ def _teclado_start_cadastrado(admin_user: bool = False) -> InlineKeyboardMarkup:
     linhas = [
         [InlineKeyboardButton("▶ Iniciar monitor", callback_data="start|iniciar")],
         [InlineKeyboardButton("⚙️ Modo Manual/Auto", callback_data="start|modo")],
+        [InlineKeyboardButton("🧭 Estratégia", callback_data="start|estrategia")],
         [InlineKeyboardButton("📱 Abrir painel", callback_data="start|painel")],
     ]
     if admin_user:
@@ -128,6 +134,39 @@ def _teclado_modo(modo_atual: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(manual, callback_data="mode|manual")],
         [InlineKeyboardButton(auto, callback_data="mode|auto")],
     ])
+
+
+def _nome_estrategia(estrategia: str) -> str:
+    if estrategia == "crypto":
+        return "Crypto Chain"
+    if estrategia == "hybrid":
+        return "Híbrido"
+    return "Stable Chain"
+
+
+def _teclado_estrategia(estrategia_atual: str) -> InlineKeyboardMarkup:
+    stable = "🟢 Stable Chain" if estrategia_atual == "stable" else "⚪ Stable Chain"
+    crypto = "🟢 Crypto Chain" if estrategia_atual == "crypto" else "⚪ Crypto Chain"
+    hybrid = "🟢 Híbrido" if estrategia_atual == "hybrid" else "⚪ Híbrido"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(stable, callback_data="strategy|stable")],
+        [InlineKeyboardButton(crypto, callback_data="strategy|crypto")],
+        [InlineKeyboardButton(hybrid, callback_data="strategy|hybrid")],
+    ])
+
+
+def _texto_estrategia(estrategia: str) -> str:
+    if estrategia == "crypto":
+        detalhe = "Motor 2 (Crypto Chain) está em preparação; por enquanto não executa entradas de cripto."
+    elif estrategia == "hybrid":
+        detalhe = "Roda o Motor 1 (Stable) e prepara integração do Motor 2 (Crypto)."
+    else:
+        detalhe = "Motor 1 ativo: BRZ↔BRLA↔BRL1↔USDT↔USDC (menor risco)."
+    return (
+        "🧭 *Estratégia Atlas*\n\n"
+        f"Atual: *{_nome_estrategia(estrategia)}*\n"
+        f"Regra: {detalhe}"
+    )
 
 
 async def _send_menu(
@@ -275,6 +314,19 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "start|estrategia":
+        user = get_user(uid)
+        if not user:
+            await query.answer("Use /cadastrar primeiro.", show_alert=True)
+            return
+        estrategia = _estrategia_usuario(user)
+        await query.message.reply_text(
+            _texto_estrategia(estrategia),
+            parse_mode="Markdown",
+            reply_markup=_teclado_estrategia(estrategia),
+        )
+        return
+
     if data == "start|painel":
         user = get_user(uid)
         if not user:
@@ -354,6 +406,26 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         except BadRequest as exc:
             # Telegram retorna erro quando o usuário toca no mesmo modo já selecionado.
+            if "Message is not modified" not in str(exc):
+                raise
+        return
+
+    if data.startswith("strategy|"):
+        nova_estrategia = data.split("|", 1)[1]
+        try:
+            set_user_strategy(uid, nova_estrategia)
+        except Exception:
+            await query.answer("Erro ao atualizar estratégia.", show_alert=True)
+            return
+        user = get_user(uid)
+        estrategia = _estrategia_usuario(user)
+        try:
+            await query.edit_message_text(
+                _texto_estrategia(estrategia),
+                parse_mode="Markdown",
+                reply_markup=_teclado_estrategia(estrategia),
+            )
+        except BadRequest as exc:
             if "Message is not modified" not in str(exc):
                 raise
         return
@@ -492,6 +564,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         addr   = user["dex_address"]
         resumo = f"{addr[:8]}...{addr[-4:]}"
         modo   = _nome_modo(_modo_usuario(user))
+        estrategia = _nome_estrategia(_estrategia_usuario(user))
 
         # Busca saldos na Polygon em background (sem travar o bot se RPC lento)
         saldo_txt = "⏳ carregando..."
@@ -519,7 +592,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"👋 *Bem-vindo de volta!*\n\n"
             f"✅ `{resumo}`  📍 Polygon\n"
             f"{saldo_txt}\n\n"
-            f"⚙️ Modo: *{modo}*"
+            f"⚙️ Modo: *{modo}*\n"
+            f"🧭 Estratégia: *{estrategia}*"
         )
         await _send_menu(update.message, caption, _teclado_start_cadastrado(is_admin(uid)))
         await update.message.reply_text(
@@ -626,6 +700,7 @@ async def receber_pk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("▶ Iniciar monitor", callback_data="start|iniciar")],
             [InlineKeyboardButton("⚙️ Definir modo", callback_data="start|modo")],
+            [InlineKeyboardButton("🧭 Definir estratégia", callback_data="start|estrategia")],
         ]),
     )
     await update.message.reply_text(
@@ -654,11 +729,13 @@ async def _iniciar_monitor(uid: int, ctx: ContextTypes.DEFAULT_TYPE) -> str:
 
     ctx.bot_data[f"running_{uid}"] = True
     modo = _nome_modo(_modo_usuario(user))
+    estrategia = _nome_estrategia(_estrategia_usuario(user))
     asyncio.create_task(loop_usuario(uid, ctx.bot, ctx.bot_data, intervalo=INTERVALO_SCAN_SEG))
     return (
         "🟢 *Monitor iniciado!*\n\n"
         f"Varrendo pares a cada {INTERVALO_SCAN_SEG}s.\n"
         f"Modo atual: *{modo}*\n"
+        f"Estratégia atual: *{estrategia}*\n"
         "Manual: envia alerta com Executar/Ignorar.\n"
         "Automático: executa compra/venda quando surgir oportunidade."
     )
@@ -685,6 +762,7 @@ async def status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     estado  = "🟢 Rodando" if rodando else "🔴 Parado"
     addr    = user["dex_address"]
     modo    = _nome_modo(_modo_usuario(user))
+    estrategia = _nome_estrategia(_estrategia_usuario(user))
     build   = os.getenv("BOT_BUILD", "desconhecido")
     started = os.getenv("BOT_STARTED_AT", "desconhecido")
 
@@ -707,6 +785,7 @@ async def status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"📊 *Status*\n\n"
         f"Estado: {estado}\n"
         f"Modo: *{modo}*\n"
+        f"Estratégia: *{estrategia}*\n"
         f"Build: `{build}`\n"
         f"Iniciado em: `{started}`\n"
         f"Carteira: `{addr[:8]}...{addr[-4:]}`\n"
@@ -733,6 +812,21 @@ async def modo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def estrategia(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user = get_user(uid)
+    if not user:
+        await update.message.reply_text("❌ Use /cadastrar primeiro.")
+        return
+
+    estrategia_atual = _estrategia_usuario(user)
+    await update.message.reply_text(
+        _texto_estrategia(estrategia_atual),
+        parse_mode="Markdown",
+        reply_markup=_teclado_estrategia(estrategia_atual),
+    )
+
+
 async def historico(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid  = update.effective_user.id
     hist = historico_usuario(uid, limite=10)
@@ -756,6 +850,7 @@ async def ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/cadastrar — Registrar carteira\n"
         "/iniciar — Ligar monitor\n"
         "/modo — Manual/Automático\n"
+        "/estrategia — Stable/Crypto/Híbrido\n"
         "/painel — Menu do aluno\n"
         "/parar — Pausar monitor\n"
         "/status — Estado atual\n"
@@ -808,6 +903,9 @@ async def atalhos_hamburger(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if texto == "⚙️ Modo":
         await modo(update, ctx)
         return
+    if texto == "🧭 Estratégia":
+        await estrategia(update, ctx)
+        return
     if texto == "📱 Painel":
         from bot.dashboard import menu_dashboard
         await menu_dashboard(update, ctx)
@@ -839,14 +937,15 @@ def registrar_todos_handlers(app):
     app.add_handler(CommandHandler("help",      ajuda))
     app.add_handler(CommandHandler("status",    status))
     app.add_handler(CommandHandler("modo",      modo))
+    app.add_handler(CommandHandler("estrategia", estrategia))
     app.add_handler(CommandHandler("iniciar",   iniciar_bot))
     app.add_handler(CommandHandler("parar",     parar_bot))
     app.add_handler(CommandHandler("historico", historico))
     app.add_handler(MessageHandler(
-        filters.Regex(r"^(☰ Menu|▶ Iniciar|⏹ Parar|📊 Status|📋 Histórico|⚙️ Modo|📱 Painel)$"),
+        filters.Regex(r"^(☰ Menu|▶ Iniciar|⏹ Parar|📊 Status|📋 Histórico|⚙️ Modo|🧭 Estratégia|📱 Painel)$"),
         atalhos_hamburger,
     ))
     app.add_handler(CallbackQueryHandler(
         callback_botao,
-        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|painel$|start\|admin$|mode\|)"
+        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|estrategia$|start\|painel$|start\|admin$|mode\||strategy\|)"
     ))

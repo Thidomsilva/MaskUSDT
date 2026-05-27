@@ -144,6 +144,7 @@ def init_db():
             dex_address  TEXT,
             dex_pk       TEXT,
             trading_mode TEXT DEFAULT 'manual',
+            strategy     TEXT DEFAULT 'stable',
             active       INTEGER DEFAULT 1,
             created_at   TEXT DEFAULT (datetime('now'))
         )
@@ -185,6 +186,8 @@ def init_db():
     }
     if "trading_mode" not in cols:
         con.execute("ALTER TABLE users ADD COLUMN trading_mode TEXT DEFAULT 'manual'")
+    if "strategy" not in cols:
+        con.execute("ALTER TABLE users ADD COLUMN strategy TEXT DEFAULT 'stable'")
 
     con.commit()
     con.close()
@@ -210,7 +213,7 @@ def save_user(telegram_id: int, username: str, address: str, pk: str):
 def get_user(telegram_id: int, include_pk: bool = False) -> dict | None:
     con = sqlite3.connect(VAULT_DB)
     row = con.execute(
-        "SELECT telegram_id,username,dex_address,dex_pk,trading_mode,active,created_at "
+        "SELECT telegram_id,username,dex_address,dex_pk,trading_mode,strategy,active,created_at "
         "FROM users WHERE telegram_id=? AND active=1", (telegram_id,)
     ).fetchone()
     con.close()
@@ -221,8 +224,9 @@ def get_user(telegram_id: int, include_pk: bool = False) -> dict | None:
         "username":    row[1],
         "dex_address": row[2],
         "trading_mode": row[4] or "manual",
-        "active":      row[5],
-        "created_at":  row[6],
+        "strategy":    row[5] or "stable",
+        "active":      row[6],
+        "created_at":  row[7],
     }
     if include_pk:
         user["dex_pk"] = _dec(row[3])
@@ -238,6 +242,20 @@ def set_user_trading_mode(telegram_id: int, mode: str) -> None:
     con.execute(
         "UPDATE users SET trading_mode=? WHERE telegram_id=?",
         (modo, telegram_id),
+    )
+    con.commit()
+    con.close()
+
+
+def set_user_strategy(telegram_id: int, strategy: str) -> None:
+    estrategia = strategy.lower().strip()
+    if estrategia not in {"stable", "crypto", "hybrid"}:
+        raise ValueError("Estratégia inválida")
+
+    con = sqlite3.connect(VAULT_DB)
+    con.execute(
+        "UPDATE users SET strategy=? WHERE telegram_id=?",
+        (estrategia, telegram_id),
     )
     con.commit()
     con.close()
