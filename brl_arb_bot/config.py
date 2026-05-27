@@ -280,10 +280,10 @@ def pares_por_estrategia(strategy: str) -> dict[int, list[tuple[str, str]]]:
 
     return {k: list(v) for k, v in PARES_MONITORADOS.items()}
 
-# ─── Thresholds ───────────────────────────────────────────────────────────────
-MIN_SPREAD_PCT     = _env_float("MIN_SPREAD_PCT", 0.35)      # % mínimo bruto para calcular
-MIN_LUCRO_USD      = _env_float("MIN_LUCRO_USD", 0.30)       # lucro líquido mínimo em USD para alertar
-SLIPPAGE_PCT       = _env_float("SLIPPAGE_PCT", 0.3)         # slippage estimado no cálculo de oportunidade (%)
+ # ─── Thresholds (ajustados para debug) ──────────────────────────────────────
+MIN_SPREAD_PCT     = _env_float("MIN_SPREAD_PCT", 0.05)      # % mínimo bruto para calcular
+MIN_LUCRO_USD      = _env_float("MIN_LUCRO_USD", 0.01)       # lucro líquido mínimo em USD para alertar
+SLIPPAGE_PCT       = _env_float("SLIPPAGE_PCT", 0.05)        # slippage estimado no cálculo de oportunidade (%)
 AMOUNT_USDT_PADRAO = _env_float("AMOUNT_USDT_PADRAO", 100)   # tamanho padrão de simulação (USD equivalente)
 INTERVALO_SCAN_SEG = _env_int("INTERVALO_SCAN_SEG", 15)       # intervalo entre scans em segundos
 

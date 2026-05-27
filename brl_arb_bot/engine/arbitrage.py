@@ -49,7 +49,7 @@ AUTO_COOLDOWN_SEG = _env_int("AUTO_COOLDOWN_SEG", 45)
 MANUAL_ALERT_COOLDOWN_SEG = _env_int("MANUAL_ALERT_COOLDOWN_SEG", 45)
 TOKENS_USD = {"USDT", "USDC", "DAI"}
 TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
-INVENTORY_MIN_USD = float(os.getenv("INVENTORY_MIN_USD", "5"))
+INVENTORY_MIN_USD = float(os.getenv("INVENTORY_MIN_USD", "0.5"))
 MONITOR_IGNORE_BALANCE = _env_bool("MONITOR_IGNORE_BALANCE", False)
 ENABLE_NON_BRL_SPREAD = _env_bool("ENABLE_NON_BRL_SPREAD", False)
 CRYPTO_MULTISOURCE_MIN_FONTES = _env_int("CRYPTO_MULTISOURCE_MIN_FONTES", 2)
@@ -485,10 +485,32 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                     "Execução automática desativada: carteira DEX não configurada."
                 )
 
+            # --- Filtros personalizados do usuário ---
+            moedas_usuario = bot_data.get(f"moedas_usuario_{telegram_id}")
+            spread_usuario = bot_data.get(f"spread_usuario_{telegram_id}")
+            lucro_usuario = bot_data.get(f"lucro_usuario_{telegram_id}")
+
+            # Filtra pares monitorados pelas moedas escolhidas, se houver
+            pares_filtrados = {}
+            if moedas_usuario:
+                for chain_id, pares in pares_ativos.items():
+                    filtrados = [p for p in pares if p[0] in moedas_usuario or p[1] in moedas_usuario]
+                    if filtrados:
+                        pares_filtrados[chain_id] = filtrados
+            else:
+                pares_filtrados = pares_ativos
+
+            # Chama detectar_oportunidades normalmente
             oportunidades = await detectar_oportunidades(
                 saldos_por_chain=saldos_por_chain,
-                pares_monitorados=pares_ativos,
+                pares_monitorados=pares_filtrados,
             )
+
+            # Aplica filtros de spread e lucro mínimo do usuário, se definidos
+            if spread_usuario is not None:
+                oportunidades = [o for o in oportunidades if o.spread_pct >= spread_usuario]
+            if lucro_usuario is not None:
+                oportunidades = [o for o in oportunidades if o.lucro_usd >= lucro_usuario]
             if oportunidades:
                 modo = user.get("trading_mode", "manual")
                 melhor = oportunidades[0]

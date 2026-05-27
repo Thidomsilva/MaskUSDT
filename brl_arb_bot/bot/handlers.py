@@ -42,6 +42,7 @@ def _menu_aluno():
         [InlineKeyboardButton("🔗 Meu Ciclo Atual", callback_data="painel|ciclo")],
         [InlineKeyboardButton("📊 Histórico", callback_data="painel|historico")],
         [InlineKeyboardButton("⚙️ Modo", callback_data="painel|modo")],
+        [InlineKeyboardButton("⚙️ Configurar Filtros", callback_data="painel|config_filtros")],
     ])
 
 """
@@ -287,6 +288,114 @@ def montar_alerta(oport, bot_data: dict | None = None, uid: int | None = None) -
 # ─── Callback botões inline ───────────────────────────────────────────────────
 
 async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    # --- Configuração de Filtros ---
+    if data == "painel|config_filtros":
+        moedas_usuario = bot_data.get(f"moedas_usuario_{uid}", set())
+        spread_usuario = bot_data.get(f"spread_usuario_{uid}")
+        lucro_usuario = bot_data.get(f"lucro_usuario_{uid}")
+        resumo = [
+            "🛠️ *Configuração de Filtros*",
+            "",
+            f"Moedas: `{', '.join(sorted(moedas_usuario)) if moedas_usuario else 'Todas'}`",
+            f"Spread mínimo: `{spread_usuario if spread_usuario is not None else 'Padrão'}`",
+            f"Lucro mínimo: `{lucro_usuario if lucro_usuario is not None else 'Padrão'}`",
+            "",
+            "Selecione o que deseja configurar:"
+        ]
+        await query.message.reply_text(
+            '\n'.join(resumo),
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Selecionar Moedas", callback_data="config|moedas")],
+                [InlineKeyboardButton("Spread mínimo", callback_data="config|spread")],
+                [InlineKeyboardButton("Lucro mínimo", callback_data="config|lucro")],
+            ])
+        )
+        return
+
+    if data == "config|moedas":
+        moedas = sorted(list(TOKENS_USD | TOKENS_BRL))
+        moedas_usuario = bot_data.get(f"moedas_usuario_{uid}", set())
+        botoes = []
+        for m in moedas:
+            marcado = "✅ " if m in moedas_usuario else ""
+            acao = "delmoeda" if m in moedas_usuario else "setmoeda"
+            botoes.append([InlineKeyboardButton(f"{marcado}{m}", callback_data=f"{acao}|{m}")])
+        botoes.append([InlineKeyboardButton("Limpar seleção", callback_data="moedas|limpar")])
+        await query.message.reply_text(
+            "Selecione as moedas que deseja monitorar (toque para marcar/desmarcar):",
+            reply_markup=InlineKeyboardMarkup(botoes)
+        )
+        return
+
+    if data == "config|spread":
+        botoes = [
+            [InlineKeyboardButton(f"{pct}%", callback_data=f"setspread|{pct}")]
+            for pct in [0.5, 1, 2, 3, 5, 10]
+        ]
+        await query.message.reply_text(
+            "Selecione o spread mínimo (%):",
+            reply_markup=InlineKeyboardMarkup(botoes)
+        )
+        return
+
+    if data == "config|lucro":
+        botoes = [
+            [InlineKeyboardButton(f"${lucro}", callback_data=f"setlucro|{lucro}")]
+            for lucro in [0.1, 0.5, 1, 2, 5, 10]
+        ]
+        await query.message.reply_text(
+            "Selecione o lucro mínimo (USD):",
+            reply_markup=InlineKeyboardMarkup(botoes)
+        )
+        return
+
+    # --- Salvando escolhas do usuário (em memória bot_data) ---
+    if data.startswith("setmoeda|"):
+        moeda = data.split("|", 1)[1]
+        moedas_usuario = bot_data.setdefault(f"moedas_usuario_{uid}", set())
+        moedas_usuario.add(moeda)
+        await query.answer(f"Moeda {moeda} adicionada!", show_alert=True)
+        # Atualiza menu
+        moedas = sorted(list(TOKENS_USD | TOKENS_BRL))
+        botoes = []
+        for m in moedas:
+            marcado = "✅ " if m in moedas_usuario else ""
+            acao = "delmoeda" if m in moedas_usuario else "setmoeda"
+            botoes.append([InlineKeyboardButton(f"{marcado}{m}", callback_data=f"{acao}|{m}")])
+        botoes.append([InlineKeyboardButton("Limpar seleção", callback_data="moedas|limpar")])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(botoes))
+        return
+
+    if data.startswith("delmoeda|"):
+        moeda = data.split("|", 1)[1]
+        moedas_usuario = bot_data.setdefault(f"moedas_usuario_{uid}", set())
+        moedas_usuario.discard(moeda)
+        await query.answer(f"Moeda {moeda} removida!", show_alert=True)
+        # Atualiza menu
+        moedas = sorted(list(TOKENS_USD | TOKENS_BRL))
+        botoes = []
+        for m in moedas:
+            marcado = "✅ " if m in moedas_usuario else ""
+            acao = "delmoeda" if m in moedas_usuario else "setmoeda"
+            botoes.append([InlineKeyboardButton(f"{marcado}{m}", callback_data=f"{acao}|{m}")])
+        botoes.append([InlineKeyboardButton("Limpar seleção", callback_data="moedas|limpar")])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(botoes))
+        return
+
+    if data == "moedas|limpar":
+        bot_data[f"moedas_usuario_{uid}"] = set()
+        await query.answer("Seleção de moedas limpa!", show_alert=True)
+        # Atualiza menu
+        moedas = sorted(list(TOKENS_USD | TOKENS_BRL))
+        botoes = []
+        for m in moedas:
+            marcado = ""
+            acao = "setmoeda"
+            botoes.append([InlineKeyboardButton(f"{marcado}{m}", callback_data=f"{acao}|{m}")])
+        botoes.append([InlineKeyboardButton("Limpar seleção", callback_data="moedas|limpar")])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(botoes))
+        return
     query = update.callback_query
     try:
         await query.answer()
