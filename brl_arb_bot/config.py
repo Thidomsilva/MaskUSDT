@@ -19,6 +19,32 @@ Pares: TODOS contra TODOS onde houver liquidez
 
 import os
 
+
+def _env_float(nome: str, default: float) -> float:
+    raw = os.getenv(nome)
+    if raw is None:
+        return default
+    s = raw.strip()
+    if not s:
+        return default
+    try:
+        return float(s)
+    except ValueError:
+        return default
+
+
+def _env_int(nome: str, default: int) -> int:
+    raw = os.getenv(nome)
+    if raw is None:
+        return default
+    s = raw.strip()
+    if not s:
+        return default
+    try:
+        return int(s)
+    except ValueError:
+        return default
+
 # ─── Redes suportadas ─────────────────────────────────────────────────────────
 NETWORKS = {
     1: {
@@ -124,11 +150,11 @@ PARES_MONITORADOS = {
 }
 
 # ─── Thresholds ───────────────────────────────────────────────────────────────
-MIN_SPREAD_PCT     = 0.35   # % mínimo bruto para calcular (BRL vs BRL pode ser menor)
-MIN_LUCRO_USD      = 0.30   # lucro líquido mínimo em USD para alertar
-SLIPPAGE_PCT       = 0.3    # slippage máximo tolerado (%)
-AMOUNT_USDT_PADRAO = 100    # tamanho padrão de simulação (USD equivalente)
-INTERVALO_SCAN_SEG = 15     # intervalo entre scans em segundos
+MIN_SPREAD_PCT     = _env_float("MIN_SPREAD_PCT", 0.35)      # % mínimo bruto para calcular
+MIN_LUCRO_USD      = _env_float("MIN_LUCRO_USD", 0.30)       # lucro líquido mínimo em USD para alertar
+SLIPPAGE_PCT       = _env_float("SLIPPAGE_PCT", 0.3)         # slippage estimado no cálculo de oportunidade (%)
+AMOUNT_USDT_PADRAO = _env_float("AMOUNT_USDT_PADRAO", 100)   # tamanho padrão de simulação (USD equivalente)
+INTERVALO_SCAN_SEG = _env_int("INTERVALO_SCAN_SEG", 15)       # intervalo entre scans em segundos
 
 # Filtro opcional de quotes USD para monitoramento.
 # Ex.: USD_QUOTES_PERMITIDAS=USDT para operar apenas pares contra USDT.
