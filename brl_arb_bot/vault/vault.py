@@ -6,6 +6,7 @@ Acesso ao banco: somente o admin (ADMIN_TELEGRAM_ID no .env).
 import os
 import sqlite3
 import logging
+import shutil
 from cryptography.fernet import Fernet
 from pathlib import Path
 
@@ -42,8 +43,46 @@ def _load_env() -> None:
 
 _load_env()
 
-VAULT_DB  = Path("vault/users.db")
-KEY_FILE  = Path("vault/.vault_key")
+_VAULT_DIR = Path(__file__).resolve().parent
+
+
+def _path_from_env(nome: str, default_path: Path) -> Path:
+    raw = (os.environ.get(nome) or "").strip()
+    if not raw:
+        return default_path
+    p = Path(raw).expanduser()
+    if p.is_absolute():
+        return p
+    return (Path.cwd() / p).resolve()
+
+
+VAULT_DB = _path_from_env("VAULT_DB_PATH", _VAULT_DIR / "users.db")
+KEY_FILE = _path_from_env("VAULT_KEY_FILE", _VAULT_DIR / ".vault_key")
+
+
+def _migrar_arquivos_legados() -> None:
+    """Migra DB/chave de caminhos legados relativos ao cwd, se necessário."""
+    legacy_db = (Path.cwd() / "vault" / "users.db").resolve()
+    legacy_key = (Path.cwd() / "vault" / ".vault_key").resolve()
+
+    try:
+        if legacy_db != VAULT_DB.resolve() and legacy_db.exists() and not VAULT_DB.exists():
+            VAULT_DB.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(legacy_db, VAULT_DB)
+            logger.warning("Migrado vault legado de %s para %s", legacy_db, VAULT_DB)
+    except Exception as exc:
+        logger.warning("Falha ao migrar users.db legado: %s", exc)
+
+    try:
+        if legacy_key != KEY_FILE.resolve() and legacy_key.exists() and not KEY_FILE.exists():
+            KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(legacy_key, KEY_FILE)
+            logger.warning("Migrada key legada de %s para %s", legacy_key, KEY_FILE)
+    except Exception as exc:
+        logger.warning("Falha ao migrar .vault_key legado: %s", exc)
+
+
+_migrar_arquivos_legados()
 
 # ─── ID do administrador ──────────────────────────────────────────────────────
 def _env_int(nome: str, default: int = 0) -> int:
