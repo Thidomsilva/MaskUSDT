@@ -1061,5 +1061,5 @@ def registrar_todos_handlers(app):
     ))
     app.add_handler(CallbackQueryHandler(
         callback_botao,
-        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|estrategia$|start\|painel$|start\|admin$|mode\||strategy\|)"
+        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|estrategia$|start\|painel$|start\|admin$|mode\||strategy\||painel\|ciclo$|painel\|historico$|painel\|modo$)"
     ))
