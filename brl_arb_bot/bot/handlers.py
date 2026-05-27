@@ -671,6 +671,7 @@ async def receber_address(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return WAIT_ADDRESS
     ctx.user_data["address"] = address
     await update.message.reply_text(
+        f"✅ Endereço confirmado: `{address}`\n\n"
         "📌 *Passo 2/2 — Private Key*\n\n"
         "Cole a private key da carteira dedicada:\n\n"
         "⚠️ Será *deletada do chat imediatamente* após o registro.",
@@ -691,11 +692,20 @@ async def receber_pk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(pk_limpa) != 64:
         await update.message.reply_text("❌ Private key inválida. Use /cadastrar novamente.")
         return ConversationHandler.END
-    save_user(uid, username, ctx.user_data["address"], pk)
+
+    address = (ctx.user_data.get("address") or "").strip()
+    if not address:
+        await update.message.reply_text(
+            "⚠️ Não encontrei o endereço da etapa anterior. Use /cadastrar novamente.",
+        )
+        return ConversationHandler.END
+
+    save_user(uid, username, address, pk)
     ctx.user_data.clear()
     await update.message.reply_text(
         "🎉 *Cadastro completo!*\n\n"
         "✅ Carteira registrada e criptografada.\n"
+        f"Carteira ativa: `{address}`\n"
         "Você nunca mais precisará digitar suas credenciais.\n\n"
         "📍 *Lembrete antes de iniciar:*\n"
         "Garanta que sua carteira tenha *USDT + POL* na Polygon.\n"
@@ -802,6 +812,23 @@ async def status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def carteira(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user = get_user(uid)
+    if not user:
+        await update.message.reply_text("❌ Não cadastrado. Use /cadastrar.")
+        return
+
+    addr = user["dex_address"]
+    await update.message.reply_text(
+        "💼 *Carteira cadastrada*\n\n"
+        f"Endereço completo:\n`{addr}`\n\n"
+        f"Resumo: `{addr[:8]}...{addr[-4:]}`\n"
+        "Se este não for o endereço correto, rode /cadastrar novamente.",
+        parse_mode="Markdown",
+    )
+
+
 async def modo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user = get_user(uid)
@@ -859,6 +886,7 @@ async def ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/painel — Menu do aluno\n"
         "/parar — Pausar monitor\n"
         "/status — Estado atual\n"
+        "/carteira — Ver endereço cadastrado\n"
         "/historico — Últimas 10 operações\n"
         "/menu — Mostrar teclado de atalhos\n"
         "/help — Esta mensagem",
@@ -941,6 +969,7 @@ def registrar_todos_handlers(app):
     app.add_handler(CommandHandler("menu",      menu_hamburger))
     app.add_handler(CommandHandler("help",      ajuda))
     app.add_handler(CommandHandler("status",    status))
+    app.add_handler(CommandHandler("carteira",  carteira))
     app.add_handler(CommandHandler("modo",      modo))
     app.add_handler(CommandHandler("estrategia", estrategia))
     app.add_handler(CommandHandler("iniciar",   iniciar_bot))
