@@ -13,7 +13,12 @@ from config import (
     SLIPPAGE_PCT, AMOUNT_USDT_PADRAO,
     USD_QUOTES_PERMITIDAS, pares_por_estrategia,
 )
-from engine.prices import buscar_todos_precos, cotacao_usd_brl_atual, buscar_saldo_polygon
+from engine.prices import (
+    buscar_todos_precos,
+    buscar_precos_multifonte,
+    cotacao_usd_brl_atual,
+    buscar_saldo_polygon,
+)
 from engine.executor import executar_swap
 from vault.vault import get_user, registrar_operacao
 
@@ -46,6 +51,9 @@ TOKENS_USD = {"USDT", "USDC", "DAI"}
 TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
 INVENTORY_MIN_USD = float(os.getenv("INVENTORY_MIN_USD", "5"))
 MONITOR_IGNORE_BALANCE = _env_bool("MONITOR_IGNORE_BALANCE", False)
+ENABLE_NON_BRL_SPREAD = _env_bool("ENABLE_NON_BRL_SPREAD", False)
+CRYPTO_MULTISOURCE_MIN_FONTES = _env_int("CRYPTO_MULTISOURCE_MIN_FONTES", 2)
+CRYPTO_MAX_SPREAD_PCT = float(os.getenv("CRYPTO_MAX_SPREAD_PCT", "8"))
 
 
 @dataclass
@@ -72,6 +80,35 @@ def _assinatura_oportunidade(oport: Oportunidade) -> str:
         f"{oport.chain_id}|{oport.token_brl}|{oport.token_usd}|"
         f"{oport.token_from}|{oport.token_to}|{round(oport.amount_usd, 2)}"
     )
+
+
+def _grupo_oportunidade(oport: Oportunidade) -> str:
+    # Pares BRL/* entram como estratégia stable; demais pares entram como crypto.
+    if oport.token_brl in TOKENS_BRL or oport.token_usd in TOKENS_BRL:
+        return "stable"
+    return "crypto"
+
+
+def _selecionar_oportunidade_auto(
+    oportunidades: list[Oportunidade],
+    estrategia: str,
+    last_sig_auto: str | None,
+    last_group_auto: str | None,
+) -> Oportunidade:
+    if not oportunidades:
+        raise ValueError("Lista de oportunidades vazia")
+
+    candidatas = [o for o in oportunidades if _assinatura_oportunidade(o) != last_sig_auto]
+    if not candidatas:
+        candidatas = oportunidades
+
+    if (estrategia or "").strip().lower() == "hybrid":
+        alvo = "stable" if (last_group_auto == "crypto") else "crypto"
+        for o in candidatas:
+            if _grupo_oportunidade(o) == alvo:
+                return o
+
+    return candidatas[0]
 
 
 # Gas estimado por rede (units × gwei × eth_price)
@@ -105,6 +142,7 @@ async def detectar_oportunidades(
 ) -> list[Oportunidade]:
     pares_ativos = pares_monitorados or PARES_MONITORADOS
     precos = await buscar_todos_precos(pares_monitorados=pares_ativos)
+    precos_multifonte = await buscar_precos_multifonte(pares_monitorados=pares_ativos)
     usd_brl = await cotacao_usd_brl_atual()
     preco_brl_teorico_usd = 1.0 / usd_brl if usd_brl > 0 else 0.2
     oportunidades = []
@@ -162,7 +200,35 @@ async def detectar_oportunidades(
                     )
                     continue
             else:
-                spread_pct = abs(preco_brl - preco_usd) / preco_usd * 100
+                # Crypto vs USD: usa dispersão multifonte do MESMO ativo para evitar
+                # falso positivo por comparar preços absolutos de tokens diferentes.
+                if token_usd in TOKENS_USD and token_brl not in TOKENS_BRL:
+                    fontes = (precos_multifonte.get(chain_id, {}).get(token_brl) or {})
+                    if len(fontes) < CRYPTO_MULTISOURCE_MIN_FONTES:
+                        continue
+
+                    precos_fontes = sorted(float(v) for v in fontes.values() if float(v) > 0)
+                    if len(precos_fontes) < CRYPTO_MULTISOURCE_MIN_FONTES:
+                        continue
+
+                    preco_min = precos_fontes[0]
+                    preco_max = precos_fontes[-1]
+                    spread_pct = (preco_max - preco_min) / preco_min * 100 if preco_min > 0 else 0
+
+                    if spread_pct > CRYPTO_MAX_SPREAD_PCT:
+                        logger.debug(
+                            f"[{token_brl}/{token_usd}] spread crypto {spread_pct:.2f}% "
+                            f"> cap {CRYPTO_MAX_SPREAD_PCT}% — descartado (outlier de fonte)"
+                        )
+                        continue
+                elif not ENABLE_NON_BRL_SPREAD:
+                    logger.debug(
+                        f"[{token_brl}/{token_usd}] par não-BRL ignorado "
+                        "(ENABLE_NON_BRL_SPREAD=false)."
+                    )
+                    continue
+                else:
+                    spread_pct = abs(preco_brl - preco_usd) / preco_usd * 100
 
             if spread_pct < MIN_SPREAD_PCT:
                 continue
@@ -182,7 +248,11 @@ async def detectar_oportunidades(
                     token_from, token_to = token_brl, token_usd
                     direcao = f"Compra {token_usd} → Vende {token_brl}"
             else:
-                if preco_brl < preco_usd:
+                if token_usd in TOKENS_USD and token_brl not in TOKENS_BRL:
+                    # Para crypto, opera inventário em stable e fecha ciclo em USD.
+                    token_from, token_to = token_usd, token_brl
+                    direcao = f"Compra {token_brl} (multifonte) → Fecha em {token_usd}"
+                elif preco_brl < preco_usd:
                     token_from, token_to = token_usd, token_brl
                     direcao = f"Compra {token_brl} → Vende {token_usd}"
                 else:
@@ -316,10 +386,13 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                 melhor = oportunidades[0]
                 if modo == "auto":
                     last_sig_auto = bot_data.get(f"auto_last_sig_{telegram_id}")
-                    for candidata in oportunidades:
-                        if _assinatura_oportunidade(candidata) != last_sig_auto:
-                            melhor = candidata
-                            break
+                    last_group_auto = bot_data.get(f"auto_last_group_{telegram_id}")
+                    melhor = _selecionar_oportunidade_auto(
+                        oportunidades=oportunidades,
+                        estrategia=estrategia,
+                        last_sig_auto=last_sig_auto,
+                        last_group_auto=last_group_auto,
+                    )
 
                 token_from = melhor.token_from
                 token_to = melhor.token_to
@@ -345,12 +418,14 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                     bot_data.pop(guard_key, None)
                     last_key = f"auto_last_exec_{telegram_id}"
                     last_sig_key = f"auto_last_sig_{telegram_id}"
+                    last_group_key = f"auto_last_group_{telegram_id}"
                     now = time.time()
                     ultimo = float(bot_data.get(last_key, 0.0))
 
                     if now - ultimo >= AUTO_COOLDOWN_SEG:
                         bot_data[last_key] = now
                         bot_data[last_sig_key] = _assinatura_oportunidade(melhor)
+                        bot_data[last_group_key] = _grupo_oportunidade(melhor)
 
                         await bot.send_message(
                             chat_id=telegram_id,
@@ -380,7 +455,7 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                             resultado.get("sucesso")
                             and close_cycle
                             and token_from in TOKENS_USD
-                            and token_to in TOKENS_BRL
+                            and token_to not in TOKENS_USD
                         ):
                             recebido_wei = int(resultado.get("received_token_wei") or 0)
                             recebido = resultado.get("received_token_amount_str")

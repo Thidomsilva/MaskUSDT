@@ -552,3 +552,57 @@ async def buscar_todos_precos(
                 resultados[chain_id][simbolo] = preco
 
     return resultados
+
+
+async def buscar_precos_multifonte(
+    pares_monitorados: dict[int, list[tuple[str, str]]] | None = None,
+) -> dict[int, dict[str, dict[str, float]]]:
+    """
+    Retorna preços por fonte para tokens não-stable monitorados.
+    Estrutura:
+      {chain_id: {"WETH": {"jumper": 2501.2, "gecko": 2499.8, ...}}}
+    """
+    pares_ativos = pares_monitorados or PARES_MONITORADOS
+    resultados: dict[int, dict[str, dict[str, float]]] = {}
+
+    async with aiohttp.ClientSession() as session:
+        for chain_id, pares in pares_ativos.items():
+            tokens_chain = TOKENS.get(chain_id, {})
+            usd_symbol, usd_address = _token_usd_referencia(chain_id)
+            if not usd_address:
+                continue
+
+            simbolos: set[str] = set()
+            for a, b in pares:
+                if a in tokens_chain and a not in {"USDT", "USDC", "DAI"}:
+                    simbolos.add(a)
+                if b in tokens_chain and b not in {"USDT", "USDC", "DAI"}:
+                    simbolos.add(b)
+
+            if not simbolos:
+                continue
+
+            chain_result: dict[str, dict[str, float]] = {}
+            for simbolo in simbolos:
+                address = tokens_chain.get(simbolo)
+                if not address:
+                    continue
+
+                fontes: dict[str, float | None] = {
+                    "1inch": _normalizar_preco(await preco_1inch(session, chain_id, address)),
+                    "jumper": _normalizar_preco(await preco_jumper(session, chain_id, address, usd_symbol, usd_address)),
+                    "oku": _normalizar_preco(await preco_oku_oracle(session, chain_id, address)),
+                    "zerox": _normalizar_preco(await preco_zerox(session, chain_id, address, usd_symbol, usd_address)),
+                    "odos": _normalizar_preco(await preco_odos(session, chain_id, address, usd_symbol, usd_address)),
+                    "llama": _normalizar_preco(await preco_llama(session, chain_id, address)),
+                    "gecko": _normalizar_preco(await preco_gecko(session, chain_id, address)),
+                }
+
+                validas = {k: float(v) for k, v in fontes.items() if v is not None and v > 0}
+                if validas:
+                    chain_result[simbolo] = validas
+
+            if chain_result:
+                resultados[chain_id] = chain_result
+
+    return resultados

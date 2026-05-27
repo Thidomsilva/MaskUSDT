@@ -174,10 +174,40 @@ def _jumper_headers() -> dict:
     return headers
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _dex_priority() -> list[str]:
-    """Ordem de tentativa dos adapters de execução."""
-    raw = os.getenv("DEX_PRIORITY", "1inch,zerox,jumper,oku,llama")
-    return [p.strip().lower() for p in raw.split(",") if p.strip()]
+    """Ordem de tentativa dos adapters de execução com filtros por credencial."""
+    raw = os.getenv("DEX_PRIORITY", "jumper,oku,llama,zerox,1inch")
+    requested = [p.strip().lower() for p in raw.split(",") if p.strip()]
+
+    if not requested:
+        requested = ["jumper", "oku", "llama"]
+
+    enable_1inch_keyless = _env_bool("ENABLE_1INCH_WITHOUT_KEY", False)
+    enable_zerox_keyless = _env_bool("ENABLE_ZEROX_WITHOUT_KEY", True)
+
+    has_oneinch_key = bool(os.getenv("ONEINCH_API_KEY", "").strip())
+    has_zerox_key = bool(os.getenv("ZEROX_API_KEY", "").strip())
+
+    allowed: list[str] = []
+    for dex in requested:
+        if dex == "1inch" and not (has_oneinch_key or enable_1inch_keyless):
+            logger.info("DEX 1inch desativada: ONEINCH_API_KEY ausente.")
+            continue
+        if dex == "zerox" and not (has_zerox_key or enable_zerox_keyless):
+            logger.info("DEX 0x desativada: ZEROX_API_KEY ausente e keyless bloqueado.")
+            continue
+        allowed.append(dex)
+
+    if not allowed:
+        return ["jumper", "oku", "llama"]
+    return allowed
 
 
 def _parse_float_env(nome: str, default: float) -> float:
