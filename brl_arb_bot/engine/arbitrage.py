@@ -33,11 +33,19 @@ def _env_int(nome: str, default: int) -> int:
         return default
 
 
+def _env_bool(nome: str, default: bool = False) -> bool:
+    raw = os.getenv(nome)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 AUTO_COOLDOWN_SEG = _env_int("AUTO_COOLDOWN_SEG", 45)
 MANUAL_ALERT_COOLDOWN_SEG = _env_int("MANUAL_ALERT_COOLDOWN_SEG", 45)
 TOKENS_USD = {"USDT", "USDC", "DAI"}
 TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
 INVENTORY_MIN_USD = float(os.getenv("INVENTORY_MIN_USD", "5"))
+MONITOR_IGNORE_BALANCE = _env_bool("MONITOR_IGNORE_BALANCE", False)
 
 
 @dataclass
@@ -258,7 +266,7 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
 
             saldos_por_chain = {}
             dex_address = user.get("dex_address")
-            if dex_address:
+            if dex_address and not MONITOR_IGNORE_BALANCE:
                 try:
                     saldos_polygon = await buscar_saldo_polygon(dex_address)
                     if isinstance(saldos_polygon, dict):
@@ -274,6 +282,9 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                             saldos_por_chain[137] = saldos_polygon
                 except Exception as e:
                     logger.warning(f"[uid={telegram_id}] Falha ao consultar saldo da Polygon: {e}")
+
+            if MONITOR_IGNORE_BALANCE:
+                logger.debug(f"[uid={telegram_id}] MONITOR_IGNORE_BALANCE=true (watch-only)")
 
             oportunidades = await detectar_oportunidades(
                 saldos_por_chain=saldos_por_chain,
