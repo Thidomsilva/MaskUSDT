@@ -67,6 +67,13 @@ class Oportunidade:
     amount_usd_equiv: float
 
 
+def _assinatura_oportunidade(oport: Oportunidade) -> str:
+    return (
+        f"{oport.chain_id}|{oport.token_brl}|{oport.token_usd}|"
+        f"{oport.token_from}|{oport.token_to}|{round(oport.amount_usd, 2)}"
+    )
+
+
 # Gas estimado por rede (units × gwei × eth_price)
 GAS_ESTIMADO = {1: 150_000, 137: 80_000, 42161: 900_000, 8453: 80_000}
 GWEI_MEDIO   = {1: 20,      137: 50,     42161: 0.1,     8453: 0.005}
@@ -264,8 +271,15 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                 continue
 
             saldos_por_chain = {}
+            auto_exec_bloqueada_msg = None
             dex_address = user.get("dex_address")
-            if dex_address and not MONITOR_IGNORE_BALANCE:
+            if MONITOR_IGNORE_BALANCE:
+                logger.debug(f"[uid={telegram_id}] MONITOR_IGNORE_BALANCE=true (watch-only)")
+                auto_exec_bloqueada_msg = (
+                    "Execução automática desativada: MONITOR_IGNORE_BALANCE=true "
+                    "mantém o scanner em watch-only."
+                )
+            elif dex_address:
                 try:
                     saldos_polygon = await buscar_saldo_polygon(dex_address)
                     if isinstance(saldos_polygon, dict):
@@ -274,36 +288,69 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                             for sym in (*TOKENS_USD, *TOKENS_BRL)
                         )
                         if not tem_saldo_confiavel:
+                            auto_exec_bloqueada_msg = (
+                                "Execução automática desativada: saldo indisponível via RPC "
+                                "para validar o token de entrada."
+                            )
                             logger.warning(
-                                f"[uid={telegram_id}] Saldos indisponíveis via RPC; seguindo scanner sem filtro de saldo."
+                                f"[uid={telegram_id}] Saldos indisponíveis via RPC; auto ficará bloqueado até normalizar."
                             )
                         else:
                             saldos_por_chain[137] = saldos_polygon
                 except Exception as e:
+                    auto_exec_bloqueada_msg = (
+                        "Execução automática desativada: falha ao consultar saldo on-chain."
+                    )
                     logger.warning(f"[uid={telegram_id}] Falha ao consultar saldo da Polygon: {e}")
-
-            if MONITOR_IGNORE_BALANCE:
-                logger.debug(f"[uid={telegram_id}] MONITOR_IGNORE_BALANCE=true (watch-only)")
+            else:
+                auto_exec_bloqueada_msg = (
+                    "Execução automática desativada: carteira DEX não configurada."
+                )
 
             oportunidades = await detectar_oportunidades(
                 saldos_por_chain=saldos_por_chain,
                 pares_monitorados=pares_ativos,
             )
             if oportunidades:
-                melhor = oportunidades[0]
-
                 modo = user.get("trading_mode", "manual")
+                melhor = oportunidades[0]
+                if modo == "auto":
+                    last_sig_auto = bot_data.get(f"auto_last_sig_{telegram_id}")
+                    for candidata in oportunidades:
+                        if _assinatura_oportunidade(candidata) != last_sig_auto:
+                            melhor = candidata
+                            break
+
                 token_from = melhor.token_from
                 token_to = melhor.token_to
                 par_exec = f"{token_from}/{token_to}"
 
                 if modo == "auto":
+                    guard_key = f"auto_exec_guard_{telegram_id}"
+                    if auto_exec_bloqueada_msg:
+                        if bot_data.get(guard_key) != auto_exec_bloqueada_msg:
+                            bot_data[guard_key] = auto_exec_bloqueada_msg
+                            await bot.send_message(
+                                chat_id=telegram_id,
+                                text=(
+                                    "⚠️ *Modo automático em observação*\n\n"
+                                    f"{auto_exec_bloqueada_msg}\n"
+                                    "O scanner continua monitorando, mas não vai enviar swap até conseguir validar saldo real."
+                                ),
+                                parse_mode="Markdown",
+                            )
+                        await asyncio.sleep(intervalo)
+                        continue
+
+                    bot_data.pop(guard_key, None)
                     last_key = f"auto_last_exec_{telegram_id}"
+                    last_sig_key = f"auto_last_sig_{telegram_id}"
                     now = time.time()
                     ultimo = float(bot_data.get(last_key, 0.0))
 
                     if now - ultimo >= AUTO_COOLDOWN_SEG:
                         bot_data[last_key] = now
+                        bot_data[last_sig_key] = _assinatura_oportunidade(melhor)
 
                         await bot.send_message(
                             chat_id=telegram_id,
@@ -410,10 +457,7 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                         logger.info(f"[uid={telegram_id}] Cooldown ativo do auto-trade.")
                 else:
                     now = time.time()
-                    sig = (
-                        f"{melhor.chain_id}|{melhor.token_brl}|{melhor.token_usd}|"
-                        f"{token_from}|{token_to}|{round(melhor.amount_usd, 2)}"
-                    )
+                    sig = _assinatura_oportunidade(melhor)
                     last_sig_key = f"manual_last_sig_{telegram_id}"
                     last_ts_key = f"manual_last_alert_ts_{telegram_id}"
                     last_sig = bot_data.get(last_sig_key)
