@@ -55,6 +55,22 @@ def _env_bool(nome: str, default: bool = False) -> bool:
 # ─── Redes suportadas ─────────────────────────────────────────────────────────
 NETWORKS = {
     1: {
+            56: {  # BSC
+                "name":          "BSC",
+                "rpc":           "https://bsc-dataseed.binance.org/",
+                "symbol":        "BNB",
+                "gas_token_usd": 600,
+                "1inch_chain":   "56",
+                "lifi_chain":    "BSC",
+            },
+            43114: {  # Avalanche
+                "name":          "Avalanche",
+                "rpc":           "https://api.avax.network/ext/bc/C/rpc",
+                "symbol":        "AVAX",
+                "gas_token_usd": 35,
+                "1inch_chain":   "43114",
+                "lifi_chain":    "AVAX",
+            },
         "name":          "Ethereum",
         "rpc":           "https://rpc.ankr.com/eth",
         "symbol":        "ETH",
@@ -95,6 +111,20 @@ TOKENS = {
         "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
         "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
         "BRZ":  "0x420412E765BFa6d85aaaC94b4f7b708C89be2e2B",
+    },
+    # BSC
+    56: {
+        "USDT": "0x55d398326f99059fF775485246999027B3197955",
+        "USDC": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+        "BNB":  "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",  # Native BNB (padrão 1inch)
+        "CAKE": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",
+    },
+    # Avalanche
+    43114: {
+        "USDT": "0xc7198437980c041c805a1edcba50c1ce5db95118",
+        "USDC": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+        "AVAX": "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7",  # WAVAX
+        "JOE":  "0x6e84a6216eA6dACC71eE8E6b0a5B7322EEbC0fDd",
     },
     # Polygon  ← hub principal de liquidez BRL em 2026
     137: {
@@ -155,6 +185,18 @@ PARES_MONITORADOS = {
         ("BRZ",  "BRL1"),
         ("BRLA", "BRL1"),
     ],
+    56: [
+        ("BNB",  "USDT"),
+        ("BNB",  "USDC"),
+        ("CAKE", "USDT"),
+        ("CAKE", "USDC"),
+    ],
+    43114: [
+        ("AVAX", "USDT"),
+        ("AVAX", "USDC"),
+        ("JOE",  "USDT"),
+        ("JOE",  "USDC"),
+    ],
 
     # ── Outras redes (desativadas — ativar quando capital justificar) ────────
     # Ethereum: gas muito alto, só vale com > $1000 de capital
@@ -185,7 +227,19 @@ CRYPTO_PARES_CORE = {
         ("LINK", "USDC"),
         ("BNB",  "USDT"),
         ("BNB",  "USDC"),
-    ]
+    ],
+    56: [
+        ("BNB",  "USDT"),
+        ("BNB",  "USDC"),
+        ("CAKE", "USDT"),
+        ("CAKE", "USDC"),
+    ],
+    43114: [
+        ("AVAX", "USDT"),
+        ("AVAX", "USDC"),
+        ("JOE",  "USDT"),
+        ("JOE",  "USDC"),
+    ],
 }
 
 # Extras solicitados ficam preparados por flag; pares serão ativados após
