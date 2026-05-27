@@ -72,7 +72,7 @@ from vault.vault import (
     user_exists, historico_usuario, registrar_operacao,
     set_user_trading_mode, set_user_strategy, is_admin,
 )
-from engine.arbitrage import loop_usuario
+from engine.arbitrage import loop_usuario, detectar_oportunidades, MONITOR_IGNORE_BALANCE
 from engine.executor import executar_swap
 from engine.prices import buscar_saldo_polygon
 
@@ -831,6 +831,65 @@ async def status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def diag(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user = get_user(uid)
+    if not user:
+        await update.message.reply_text("❌ Não cadastrado. Use /cadastrar.")
+        return
+
+    from config import pares_por_estrategia
+
+    strategy = (user.get("strategy") or "stable").strip().lower()
+    pares = pares_por_estrategia(strategy)
+    total_pares = sum(len(v) for v in pares.values())
+
+    saldos = await buscar_saldo_polygon(user["dex_address"])
+
+    ops_market = await detectar_oportunidades(pares_monitorados=pares)
+    ops_balance = await detectar_oportunidades(
+        pares_monitorados=pares,
+        saldos_por_chain={137: saldos},
+    )
+
+    top_market = ops_market[0] if ops_market else None
+    top_balance = ops_balance[0] if ops_balance else None
+
+    linhas = [
+        "🧪 *Diagnóstico do Scanner*",
+        "",
+        f"Modo: *{_nome_modo(_modo_usuario(user))}*",
+        f"Estratégia: *{_nome_estrategia(_estrategia_usuario(user))}*",
+        f"Pares ativos: `{total_pares}`",
+        f"Ignore saldo (watch-only): `{MONITOR_IGNORE_BALANCE}`",
+        "",
+        "*Saldos Polygon (resumo)*",
+        f"USDT: `{(saldos.get('USDT') or 0):.6f}` | USDC: `{(saldos.get('USDC') or 0):.6f}` | DAI: `{(saldos.get('DAI') or 0):.6f}`",
+        f"POL: `{(saldos.get('POL') or 0):.6f}`",
+        "",
+        f"Oportunidades de mercado: `{len(ops_market)}`",
+        f"Oportunidades com saldo: `{len(ops_balance)}`",
+    ]
+
+    if top_market:
+        linhas.extend([
+            "",
+            "*Top mercado*",
+            f"`{top_market.rede}` {top_market.token_from}->{top_market.token_to}",
+            f"Spread: `{top_market.spread_pct:.4f}%` | Lucro est.: `${top_market.lucro_usd:.4f}`",
+        ])
+
+    if top_balance:
+        linhas.extend([
+            "",
+            "*Top com saldo*",
+            f"`{top_balance.rede}` {top_balance.token_from}->{top_balance.token_to}",
+            f"Spread: `{top_balance.spread_pct:.4f}%` | Lucro est.: `${top_balance.lucro_usd:.4f}`",
+        ])
+
+    await update.message.reply_text("\n".join(linhas), parse_mode="Markdown")
+
+
 async def carteira(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user = get_user(uid)
@@ -905,6 +964,7 @@ async def ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/painel — Menu do aluno\n"
         "/parar — Pausar monitor\n"
         "/status — Estado atual\n"
+        "/diag — Diagnóstico do scanner\n"
         "/carteira — Ver endereço cadastrado\n"
         "/historico — Últimas 10 operações\n"
         "/menu — Mostrar teclado de atalhos\n"
@@ -988,6 +1048,7 @@ def registrar_todos_handlers(app):
     app.add_handler(CommandHandler("menu",      menu_hamburger))
     app.add_handler(CommandHandler("help",      ajuda))
     app.add_handler(CommandHandler("status",    status))
+    app.add_handler(CommandHandler("diag",      diag))
     app.add_handler(CommandHandler("carteira",  carteira))
     app.add_handler(CommandHandler("modo",      modo))
     app.add_handler(CommandHandler("estrategia", estrategia))
