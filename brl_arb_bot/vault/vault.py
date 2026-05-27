@@ -46,7 +46,21 @@ VAULT_DB  = Path("vault/users.db")
 KEY_FILE  = Path("vault/.vault_key")
 
 # ─── ID do administrador ──────────────────────────────────────────────────────
-ADMIN_ID = int(os.environ.get("ADMIN_TELEGRAM_ID", "0"))
+def _env_int(nome: str, default: int = 0) -> int:
+    raw = os.environ.get(nome)
+    if raw is None:
+        return default
+    s = raw.strip()
+    if not s:
+        return default
+    try:
+        return int(s)
+    except ValueError:
+        logger.warning("Variável %s inválida (%r); usando padrão %s", nome, raw, default)
+        return default
+
+
+ADMIN_ID = _env_int("ADMIN_TELEGRAM_ID", 0)
 
 
 def is_admin(telegram_id: int) -> bool:
@@ -352,3 +366,190 @@ def admin_ops_recentes(limite: int = 15) -> list[dict]:
              "par":r[3],"spread_pct":r[4],"lucro_usd":r[5],
              "status":r[6],"created_at":r[7]}
             for r in rows]
+
+
+# ─── Ciclos de arbitragem (compatibilidade) ─────────────────────────────────
+
+def get_numero_ciclos(telegram_id: int) -> int:
+    con = sqlite3.connect(VAULT_DB)
+    row = con.execute(
+        "SELECT COALESCE(MAX(ciclo_numero), 0) FROM posicoes WHERE telegram_id=?",
+        (telegram_id,),
+    ).fetchone()
+    con.close()
+    return int((row or [0])[0] or 0)
+
+
+def get_posicao_aberta(telegram_id: int) -> dict | None:
+    con = sqlite3.connect(VAULT_DB)
+    row = con.execute(
+        """
+        SELECT telegram_id, ciclo_numero, token_atual, amount_token,
+               saldo_entrada, saldo_atual_usd, hops, status, created_at, updated_at
+        FROM posicoes
+        WHERE telegram_id=? AND status='aberto'
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+        """,
+        (telegram_id,),
+    ).fetchone()
+    con.close()
+    if not row:
+        return None
+    return {
+        "telegram_id": row[0],
+        "ciclo_numero": row[1],
+        "token_atual": row[2],
+        "amount_token": float(row[3] or 0),
+        "saldo_entrada": float(row[4] or 0),
+        "saldo_atual_usd": float(row[5] or 0),
+        "hops": row[6] or "[]",
+        "status": row[7],
+        "created_at": row[8],
+        "updated_at": row[9],
+    }
+
+
+def criar_posicao(
+    telegram_id: int,
+    ciclo_numero: int,
+    token_atual: str,
+    amount_token: float,
+    saldo_entrada: float,
+) -> None:
+    con = sqlite3.connect(VAULT_DB)
+    con.execute(
+        """
+        INSERT INTO posicoes (
+            telegram_id, ciclo_numero, token_atual, amount_token,
+            saldo_entrada, saldo_atual_usd, hops, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'aberto')
+        """,
+        (
+            telegram_id,
+            ciclo_numero,
+            token_atual,
+            float(amount_token),
+            float(saldo_entrada),
+            float(saldo_entrada),
+            "[]",
+        ),
+    )
+    con.commit()
+    con.close()
+
+
+def atualizar_posicao(
+    telegram_id: int,
+    token_atual: str,
+    amount_token: float,
+    saldo_atual_usd: float,
+    hops: str,
+) -> None:
+    con = sqlite3.connect(VAULT_DB)
+    con.execute(
+        """
+        UPDATE posicoes
+        SET token_atual=?, amount_token=?, saldo_atual_usd=?, hops=?,
+            updated_at=datetime('now')
+        WHERE id = (
+            SELECT id FROM posicoes
+            WHERE telegram_id=? AND status='aberto'
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+        )
+        """,
+        (token_atual, float(amount_token), float(saldo_atual_usd), hops, telegram_id),
+    )
+    con.commit()
+    con.close()
+
+
+def fechar_posicao(telegram_id: int, saldo_final_usd: float) -> None:
+    con = sqlite3.connect(VAULT_DB)
+    con.execute(
+        """
+        UPDATE posicoes
+        SET saldo_atual_usd=?, status='fechado', updated_at=datetime('now')
+        WHERE id = (
+            SELECT id FROM posicoes
+            WHERE telegram_id=? AND status='aberto'
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+        )
+        """,
+        (float(saldo_final_usd), telegram_id),
+    )
+    con.commit()
+    con.close()
+
+
+def get_saldo_historico(telegram_id: int) -> dict:
+    con = sqlite3.connect(VAULT_DB)
+
+    row_init = con.execute(
+        """
+        SELECT saldo_entrada
+        FROM posicoes
+        WHERE telegram_id=?
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+        """,
+        (telegram_id,),
+    ).fetchone()
+
+    row_open = con.execute(
+        """
+        SELECT saldo_atual_usd
+        FROM posicoes
+        WHERE telegram_id=? AND status='aberto'
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+        """,
+        (telegram_id,),
+    ).fetchone()
+
+    row_last_closed = con.execute(
+        """
+        SELECT saldo_atual_usd
+        FROM posicoes
+        WHERE telegram_id=? AND status='fechado'
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+        """,
+        (telegram_id,),
+    ).fetchone()
+
+    row_counts = con.execute(
+        """
+        SELECT
+            COUNT(*) as total_ciclos,
+            COALESCE(SUM(saldo_atual_usd - saldo_entrada), 0) as lucro_total,
+            COALESCE(AVG((julianday(updated_at) - julianday(created_at)) * 86400), 0) as tempo_medio
+        FROM posicoes
+        WHERE telegram_id=? AND status='fechado'
+        """,
+        (telegram_id,),
+    ).fetchone()
+
+    con.close()
+
+    saldo_inicial = float((row_init or [0])[0] or 0)
+    if row_open and row_open[0] is not None:
+        saldo_atual = float(row_open[0])
+    elif row_last_closed and row_last_closed[0] is not None:
+        saldo_atual = float(row_last_closed[0])
+    else:
+        saldo_atual = saldo_inicial
+
+    total_ciclos = int((row_counts or [0, 0, 0])[0] or 0)
+    lucro_total = float((row_counts or [0, 0, 0])[1] or 0)
+    tempo_medio = float((row_counts or [0, 0, 0])[2] or 0)
+
+    return {
+        "saldo_inicial": saldo_inicial,
+        "saldo_atual": saldo_atual,
+        "lucro_total": lucro_total,
+        "total_ciclos": total_ciclos,
+        "tempo_medio_ciclo": tempo_medio,
+    }

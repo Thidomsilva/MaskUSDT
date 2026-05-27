@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from engine.chain import iniciar_ciclo, loop_cadeia
 from vault.vault import get_posicao_aberta, get_numero_ciclos, get_saldo_historico
 # ─── Comando /ciclo ──────────────────────────────────────────────────────────
@@ -334,10 +336,6 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=_menu_admin(),
         )
         return
-def registrar_todos_handlers_ciclo(app):
-    app.add_handler(CommandHandler("ciclo", ciclo))
-# No final do arquivo, registre o handler do ciclo
-definicoes_extra = [CommandHandler("ciclo", ciclo)]
 
     if data.startswith("mode|"):
         novo_modo = data.split("|", 1)[1]
@@ -514,6 +512,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if brl1 is not None: linhas.append(f"  • BRL1:  `{brl1:.2f}`")
             saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
         except Exception:
+            logger.exception("Falha ao buscar saldos no /start uid=%s addr=%s", uid, addr)
             saldo_txt = "_indisponível_"
 
         caption = (
@@ -546,7 +545,12 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ─── Cadastro ─────────────────────────────────────────────────────────────────
 
 async def cadastrar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    msg = update.effective_message
+    if not msg:
+        logger.warning("/cadastrar sem effective_message uid=%s", getattr(update.effective_user, "id", "?"))
+        return ConversationHandler.END
+
+    await msg.reply_text(
         "📌 *Passo 1/2 — Endereço da carteira*\n\n"
         "Crie uma carteira *dedicada exclusivamente ao bot*.\n"
         "⚠️ *Nunca use sua MetaMask principal.*\n\n"
@@ -562,7 +566,12 @@ async def cadastrar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cadastrar_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Entrada do fluxo de cadastro via botão inline no /start."""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as exc:
+        if "Query is too old" not in str(exc) and "query id is invalid" not in str(exc):
+            raise
+        return ConversationHandler.END
     await query.message.reply_text(
         "📌 *Passo 1/2 — Endereço da carteira*\n\n"
         "Crie uma carteira *dedicada exclusivamente ao bot*.\n"
@@ -678,6 +687,22 @@ async def status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     modo    = _nome_modo(_modo_usuario(user))
     build   = os.getenv("BOT_BUILD", "desconhecido")
     started = os.getenv("BOT_STARTED_AT", "desconhecido")
+
+    saldo_txt = "_indisponível_"
+    try:
+        saldos = await buscar_saldo_polygon(addr)
+        linhas = []
+        if saldos.get("POL")  is not None: linhas.append(f"  • POL:   `{saldos['POL']:.4f}`")
+        if saldos.get("USDT") is not None: linhas.append(f"  • USDT:  `{saldos['USDT']:.2f}`")
+        if saldos.get("USDC") is not None: linhas.append(f"  • USDC:  `{saldos['USDC']:.2f}`")
+        if saldos.get("DAI")  is not None: linhas.append(f"  • DAI:   `{saldos['DAI']:.2f}`")
+        if saldos.get("BRZ")  is not None: linhas.append(f"  • BRZ:   `{saldos['BRZ']:.2f}`")
+        if saldos.get("BRLA") is not None: linhas.append(f"  • BRLA:  `{saldos['BRLA']:.2f}`")
+        if saldos.get("BRL1") is not None: linhas.append(f"  • BRL1:  `{saldos['BRL1']:.2f}`")
+        saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
+    except Exception:
+        logger.exception("Falha ao buscar saldos no /status uid=%s addr=%s", uid, addr)
+
     await update.message.reply_text(
         f"📊 *Status*\n\n"
         f"Estado: {estado}\n"
@@ -685,6 +710,8 @@ async def status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Build: `{build}`\n"
         f"Iniciado em: `{started}`\n"
         f"Carteira: `{addr[:8]}...{addr[-4:]}`\n"
+        f"\n📍 *Saldos Polygon*\n{saldo_txt}\n"
+        f"\n"
         f"Redes: Ethereum • Polygon • Arbitrum • Base\n"
         f"Pares: BRZ/USDT • BRZ/USDC • BRLA/USDC",
         parse_mode="Markdown"
@@ -740,16 +767,21 @@ async def ajuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def menu_hamburger(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    if not msg:
+        logger.warning("/menu sem effective_message uid=%s", getattr(update.effective_user, "id", "?"))
+        return
+
     uid = update.effective_user.id
     user = get_user(uid)
     if user:
-        await update.message.reply_text(
+        await msg.reply_text(
             "☰ *Menu rápido*\nEscolha uma opção pelos botões abaixo.",
             parse_mode="Markdown",
             reply_markup=_teclado_hamburger(),
         )
     else:
-        await update.message.reply_text(
+        await msg.reply_text(
             "☰ Menu disponível. Primeiro finalize seu cadastro em /cadastrar.",
             reply_markup=_teclado_hamburger(),
         )
@@ -802,6 +834,7 @@ def get_conversation_handler():
 def registrar_todos_handlers(app):
     app.add_handler(get_conversation_handler())
     app.add_handler(CommandHandler("start",     start))
+    app.add_handler(CommandHandler("ciclo",     ciclo))
     app.add_handler(CommandHandler("menu",      menu_hamburger))
     app.add_handler(CommandHandler("help",      ajuda))
     app.add_handler(CommandHandler("status",    status))

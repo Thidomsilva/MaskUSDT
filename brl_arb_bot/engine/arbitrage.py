@@ -19,8 +19,22 @@ from vault.vault import get_user, registrar_operacao
 
 logger = logging.getLogger(__name__)
 
-AUTO_COOLDOWN_SEG = int(os.getenv("AUTO_COOLDOWN_SEG", "45"))
-MANUAL_ALERT_COOLDOWN_SEG = int(os.getenv("MANUAL_ALERT_COOLDOWN_SEG", "45"))
+def _env_int(nome: str, default: int) -> int:
+    raw = os.getenv(nome)
+    if raw is None:
+        return default
+    s = raw.strip()
+    if not s:
+        return default
+    try:
+        return int(s)
+    except ValueError:
+        logger.warning("Variável %s inválida (%r); usando padrão %s", nome, raw, default)
+        return default
+
+
+AUTO_COOLDOWN_SEG = _env_int("AUTO_COOLDOWN_SEG", 45)
+MANUAL_ALERT_COOLDOWN_SEG = _env_int("MANUAL_ALERT_COOLDOWN_SEG", 45)
 TOKENS_USD = {"USDT", "USDC", "DAI"}
 TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
 INVENTORY_MIN_USD = float(os.getenv("INVENTORY_MIN_USD", "5"))

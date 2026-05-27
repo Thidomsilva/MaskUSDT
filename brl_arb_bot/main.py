@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from telegram import BotCommand, MenuButtonCommands
 from telegram.ext import ApplicationBuilder
 
 from vault.vault import init_db
@@ -104,14 +105,36 @@ def _notify_boot_admin(token: str, admin_id: str, build_id: str, started_at: str
         logging.getLogger(__name__).warning(f"Falha ao enviar notificação de boot: {exc}")
 
 
+async def _post_init_config_menu(app) -> None:
+    """Configura comandos e botão de menu no Telegram."""
+    logger = logging.getLogger(__name__)
+    comandos = [
+        BotCommand("start", "Tela inicial"),
+        BotCommand("cadastrar", "Registrar carteira"),
+        BotCommand("iniciar", "Ligar monitor"),
+        BotCommand("parar", "Pausar monitor"),
+        BotCommand("status", "Ver status e saldos"),
+        BotCommand("modo", "Alternar Manual/Auto"),
+        BotCommand("painel", "Abrir painel"),
+        BotCommand("menu", "Mostrar atalhos"),
+        BotCommand("historico", "Últimas operações"),
+        BotCommand("help", "Ajuda"),
+    ]
+    try:
+        await app.bot.set_my_commands(comandos)
+        await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except Exception as exc:
+        logger.warning(f"Falha ao configurar menu de comandos no Telegram: {exc}")
+
+
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("Configure TELEGRAM_BOT_TOKEN no .env")
 
-    admin_id = os.environ.get("ADMIN_TELEGRAM_ID", "0")
-    if admin_id == "0":
-        raise RuntimeError("Configure ADMIN_TELEGRAM_ID no .env")
+    admin_id = (os.environ.get("ADMIN_TELEGRAM_ID") or "").strip()
+    if not admin_id or not admin_id.isdigit() or int(admin_id) <= 0:
+        raise RuntimeError("Configure ADMIN_TELEGRAM_ID com um inteiro positivo no .env")
 
     init_db()
 
@@ -121,7 +144,7 @@ def main():
     os.environ["BOT_STARTED_AT"] = started_at
     _notify_boot_admin(token, admin_id, build_id, started_at)
 
-    app = ApplicationBuilder().token(token).build()
+    app = ApplicationBuilder().token(token).post_init(_post_init_config_menu).build()
 
     registrar_todos_handlers(app)      # aluno: cadastro, iniciar, parar, status
     registrar_dashboard_handlers(app)  # aluno: painel com operações e lucros

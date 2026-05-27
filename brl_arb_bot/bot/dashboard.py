@@ -199,7 +199,7 @@ async def _mostrar_carteira(query, user: dict):
         if saldos.get("BRL1") is not None: linhas.append(f"  • BRL1:  `{saldos['BRL1']:.2f}`")
         saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
     except Exception:
-        pass
+        logger.exception("Falha ao buscar saldos no painel uid=%s addr=%s", user.get("telegram_id"), addr)
 
     try:
         await query.edit_message_text(
@@ -215,7 +215,7 @@ async def _mostrar_carteira(query, user: dict):
             reply_markup=_botao_voltar(),
         )
     except Exception:
-        pass
+        logger.exception("Falha ao renderizar carteira no painel uid=%s", user.get("telegram_id"))
 
 
 # ─── Registra handlers ────────────────────────────────────────────────────────
