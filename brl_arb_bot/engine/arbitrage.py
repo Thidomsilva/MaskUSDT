@@ -113,7 +113,7 @@ def _selecionar_oportunidade_auto(
 
 
 def _close_cycle_intermediarios(token_from: str, token_to: str) -> list[str]:
-    raw = os.getenv("CLOSE_CYCLE_INTERMEDIATE_TOKENS", "USDC,DAI,USDT")
+    raw = os.getenv("CLOSE_CYCLE_INTERMEDIATE_TOKENS", "USDC,DAI,USDT,BRZ,BRLA,BRL1")
     itens = [t.strip().upper() for t in raw.split(",") if t.strip()]
     vistos: set[str] = set()
     saida: list[str] = []
@@ -121,65 +121,89 @@ def _close_cycle_intermediarios(token_from: str, token_to: str) -> list[str]:
         if t in vistos:
             continue
         vistos.add(t)
-        if t not in TOKENS_USD:
-            continue
         if t in {token_from, token_to}:
             continue
         saida.append(t)
     return saida
 
 
+def _close_cycle_targets(token_base: str) -> list[str]:
+    raw = os.getenv("CLOSE_CYCLE_TARGET_TOKENS", ",".join(sorted(USD_QUOTES_PERMITIDAS)))
+    itens = [t.strip().upper() for t in raw.split(",") if t.strip()]
+
+    vistos: set[str] = set()
+    saida: list[str] = []
+
+    if token_base in TOKENS_USD:
+        vistos.add(token_base)
+        saida.append(token_base)
+
+    for t in itens:
+        if t in vistos:
+            continue
+        if t not in TOKENS_USD:
+            continue
+        vistos.add(t)
+        saida.append(t)
+
+    if not saida:
+        saida = [token_base] if token_base in TOKENS_USD else ["USDT"]
+
+    return saida
+
+
 async def _planejar_fechamento_ciclo(
     chain_id: int,
-    token_from: str,
-    token_to: str,
-    amount_token_to: str,
+    token_base: str,
+    token_inventory: str,
+    amount_token_inventory: str,
     wallet: str,
 ) -> dict:
     candidatos: list[dict] = []
 
-    direto = await estimar_retorno_swap(
-        chain_id=chain_id,
-        token_from=token_to,
-        token_to=token_from,
-        amount_usd=amount_token_to,
-        wallet=wallet,
-    )
-    if direto.get("sucesso"):
-        candidatos.append({
-            "path": [token_to, token_from],
-            "retorno_estimado": float(direto.get("expected_out_amount") or 0),
-        })
-
-    for mid in _close_cycle_intermediarios(token_from=token_from, token_to=token_to):
-        leg1 = await estimar_retorno_swap(
+    for alvo in _close_cycle_targets(token_base=token_base):
+        direto = await estimar_retorno_swap(
             chain_id=chain_id,
-            token_from=token_to,
-            token_to=mid,
-            amount_usd=amount_token_to,
+            token_from=token_inventory,
+            token_to=alvo,
+            amount_usd=amount_token_inventory,
             wallet=wallet,
         )
-        if not leg1.get("sucesso"):
-            continue
+        if direto.get("sucesso"):
+            candidatos.append({
+                "path": [token_inventory, alvo],
+                "retorno_estimado": float(direto.get("expected_out_amount") or 0),
+            })
 
-        amount_mid = leg1.get("expected_out_amount_str")
-        if not amount_mid:
-            continue
+        for mid in _close_cycle_intermediarios(token_from=alvo, token_to=token_inventory):
+            leg1 = await estimar_retorno_swap(
+                chain_id=chain_id,
+                token_from=token_inventory,
+                token_to=mid,
+                amount_usd=amount_token_inventory,
+                wallet=wallet,
+            )
+            if not leg1.get("sucesso"):
+                continue
 
-        leg2 = await estimar_retorno_swap(
-            chain_id=chain_id,
-            token_from=mid,
-            token_to=token_from,
-            amount_usd=amount_mid,
-            wallet=wallet,
-        )
-        if not leg2.get("sucesso"):
-            continue
+            amount_mid = leg1.get("expected_out_amount_str")
+            if not amount_mid:
+                continue
 
-        candidatos.append({
-            "path": [token_to, mid, token_from],
-            "retorno_estimado": float(leg2.get("expected_out_amount") or 0),
-        })
+            leg2 = await estimar_retorno_swap(
+                chain_id=chain_id,
+                token_from=mid,
+                token_to=alvo,
+                amount_usd=amount_mid,
+                wallet=wallet,
+            )
+            if not leg2.get("sucesso"):
+                continue
+
+            candidatos.append({
+                "path": [token_inventory, mid, alvo],
+                "retorno_estimado": float(leg2.get("expected_out_amount") or 0),
+            })
 
     if not candidatos:
         return {
@@ -546,9 +570,9 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                             if recebido_wei > 0 and recebido:
                                 plano_fechamento = await _planejar_fechamento_ciclo(
                                     chain_id=melhor.chain_id,
-                                    token_from=token_from,
-                                    token_to=token_to,
-                                    amount_token_to=recebido,
+                                    token_base=token_from,
+                                    token_inventory=token_to,
+                                    amount_token_inventory=recebido,
                                     wallet=user["dex_address"],
                                 )
 
@@ -567,26 +591,27 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                                         )
                                     else:
                                         path = plano_fechamento.get("path") or [token_to, token_from]
+                                        alvo_final = str(path[-1])
                                         if len(path) == 2:
                                             resultado_volta = await executar_swap(
                                                 chain_id=melhor.chain_id,
                                                 token_from=token_to,
-                                                token_to=token_from,
+                                                token_to=alvo_final,
                                                 amount_usd=recebido,
                                                 wallet=user["dex_address"],
                                                 private_key=user["dex_pk"],
                                             )
                                             if resultado_volta.get("sucesso"):
-                                                usd_recebido = float(resultado_volta.get("received_token_amount") or 0)
-                                                lucro_real = usd_recebido - float(melhor.amount_usd)
+                                                recebido_final = float(resultado_volta.get("received_token_amount") or 0)
+                                                lucro_real = recebido_final - float(melhor.amount_usd)
                                                 ciclo_txt = (
-                                                    f"\n\n🔁 Ciclo fechado `{token_to}->{token_from}`"
+                                                    f"\n\n🔁 Ciclo fechado `{token_to}->{alvo_final}`"
                                                     f"\n💰 Lucro realizado: `${lucro_real:.4f}`"
                                                 )
                                             else:
                                                 ciclo_txt = (
                                                     f"\n\n⚠️ Ciclo não fechado (saldo em {token_to})."
-                                                    f"\nErro volta: `{resultado_volta.get('erro', 'desconhecido')}`"
+                                                    f"\nErro volta ({token_to}->{alvo_final}): `{resultado_volta.get('erro', 'desconhecido')}`"
                                                 )
                                         else:
                                             mid = str(path[1])
@@ -614,22 +639,22 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                                                     volta_2 = await executar_swap(
                                                         chain_id=melhor.chain_id,
                                                         token_from=mid,
-                                                        token_to=token_from,
+                                                        token_to=alvo_final,
                                                         amount_usd=recebido_mid,
                                                         wallet=user["dex_address"],
                                                         private_key=user["dex_pk"],
                                                     )
                                                     if volta_2.get("sucesso"):
-                                                        usd_recebido = float(volta_2.get("received_token_amount") or 0)
-                                                        lucro_real = usd_recebido - float(melhor.amount_usd)
+                                                        recebido_final = float(volta_2.get("received_token_amount") or 0)
+                                                        lucro_real = recebido_final - float(melhor.amount_usd)
                                                         ciclo_txt = (
-                                                            f"\n\n🔁 Ciclo fechado `{token_to}->{mid}->{token_from}`"
+                                                            f"\n\n🔁 Ciclo fechado `{token_to}->{mid}->{alvo_final}`"
                                                             f"\n💰 Lucro realizado: `${lucro_real:.4f}`"
                                                         )
                                                     else:
                                                         ciclo_txt = (
                                                             f"\n\n⚠️ Ciclo não fechado (saldo em {mid})."
-                                                            f"\nErro volta 2 ({mid}->{token_from}): `{volta_2.get('erro', 'desconhecido')}`"
+                                                            f"\nErro volta 2 ({mid}->{alvo_final}): `{volta_2.get('erro', 'desconhecido')}`"
                                                         )
 
                         if resultado.get("sucesso"):
