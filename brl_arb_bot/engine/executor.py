@@ -340,6 +340,55 @@ def _to_wei_amount(chain_id: int, token_symbol: str, amount_usd: float | int | s
     return _to_base_units(amount_usd, decimais)
 
 
+def _coletar_ints_por_chave(obj, chaves: set[str], saida: list[int]) -> None:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(k, str) and k in chaves:
+                val = _parse_int_value(v, 0)
+                if val > 0:
+                    saida.append(val)
+            _coletar_ints_por_chave(v, chaves, saida)
+    elif isinstance(obj, list):
+        for item in obj:
+            _coletar_ints_por_chave(item, chaves, saida)
+
+
+def _extrair_to_amount_wei(rota: dict | None) -> int:
+    if not isinstance(rota, dict):
+        return 0
+
+    candidatos: list[int] = []
+    raw = rota.get("raw") if isinstance(rota.get("raw"), dict) else {}
+
+    for valor in (
+        rota.get("dstAmount"),
+        rota.get("buyAmount"),
+        rota.get("toAmount"),
+        rota.get("outAmount"),
+        raw.get("dstAmount"),
+        raw.get("buyAmount"),
+        raw.get("toAmount"),
+        raw.get("outAmount"),
+    ):
+        i = _parse_int_value(valor, 0)
+        if i > 0:
+            candidatos.append(i)
+
+    chaves = {
+        "dstAmount",
+        "buyAmount",
+        "toAmount",
+        "outAmount",
+        "amountOut",
+        "toTokenAmount",
+        "outputAmount",
+        "minOutputAmount",
+    }
+    _coletar_ints_por_chave(rota, chaves, candidatos)
+
+    return max(candidatos) if candidatos else 0
+
+
 def _token_balance_wei(
     w3: Web3,
     chain_id: int,
@@ -1239,3 +1288,78 @@ async def executar_swap(
     except Exception as e:
         logger.error(f"Erro ao assinar/enviar tx: {e}")
         return {"sucesso": False, "erro": str(e)}
+
+
+async def estimar_retorno_swap(
+    chain_id: int,
+    token_from: str,
+    token_to: str,
+    amount_usd: float | int | str,
+    wallet: str,
+) -> dict:
+    """Estima retorno do swap sem enviar transação (usado para validar fechamento de ciclo)."""
+    diagnostico: list[str] = []
+    slippage_steps = _slippage_steps()
+
+    for dex in _dex_priority():
+        rota = None
+
+        if dex == "1inch":
+            for sl in slippage_steps:
+                rota = await buscar_rota_swap(
+                    chain_id,
+                    token_from,
+                    token_to,
+                    amount_usd,
+                    wallet,
+                    slippage_pct=sl,
+                )
+                if rota and rota.get("tx"):
+                    rota["fonte"] = rota.get("fonte", "1inch")
+                    break
+                if rota and rota.get("erro"):
+                    diagnostico.append(f"1inch@{sl}%: {rota['erro']}")
+        elif dex == "zerox":
+            rota = await buscar_rota_swap_zerox(chain_id, token_from, token_to, amount_usd, wallet)
+        elif dex == "jumper":
+            rota = await buscar_rota_swap_jumper(chain_id, token_from, token_to, amount_usd, wallet)
+        elif dex == "oku":
+            rota = await buscar_rota_swap_oku(chain_id, token_from, token_to, amount_usd, wallet)
+        elif dex == "llama":
+            rota = await buscar_rota_swap_llama(chain_id, token_from, token_to, amount_usd, wallet)
+
+        if rota and rota.get("tx"):
+            out_wei = _extrair_to_amount_wei(rota)
+            if out_wei <= 0:
+                diagnostico.append(f"{dex}: rota sem outAmount legível")
+                continue
+
+            token_to_addr = TOKENS.get(chain_id, {}).get(token_to)
+            if not token_to_addr:
+                return {
+                    "sucesso": False,
+                    "erro": f"Token {token_to} não mapeado na rede {chain_id}.",
+                }
+
+            dec_to = _token_decimais(chain_id, token_to_addr)
+            out_str = _base_units_to_amount_str(out_wei, dec_to)
+            out_amount = float(out_str)
+
+            return {
+                "sucesso": True,
+                "fonte": rota.get("fonte", dex),
+                "expected_out_wei": out_wei,
+                "expected_out_amount": out_amount,
+                "expected_out_amount_str": out_str,
+            }
+
+        if rota and rota.get("erro"):
+            diagnostico.append(f"{dex}: {rota['erro']}")
+        else:
+            diagnostico.append(f"{dex}: sem rota")
+
+    detalhe = " | ".join(diagnostico[:4]) if diagnostico else "sem detalhes"
+    return {
+        "sucesso": False,
+        "erro": f"Não foi possível estimar retorno para o swap. Diagnóstico: {detalhe}",
+    }
