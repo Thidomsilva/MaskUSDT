@@ -55,28 +55,28 @@ def _env_bool(nome: str, default: bool = False) -> bool:
 # ─── Redes suportadas ─────────────────────────────────────────────────────────
 NETWORKS = {
     1: {
-            56: {  # BSC
-                "name":          "BSC",
-                "rpc":           "https://bsc-dataseed.binance.org/",
-                "symbol":        "BNB",
-                "gas_token_usd": 600,
-                "1inch_chain":   "56",
-                "lifi_chain":    "BSC",
-            },
-            43114: {  # Avalanche
-                "name":          "Avalanche",
-                "rpc":           "https://api.avax.network/ext/bc/C/rpc",
-                "symbol":        "AVAX",
-                "gas_token_usd": 35,
-                "1inch_chain":   "43114",
-                "lifi_chain":    "AVAX",
-            },
         "name":          "Ethereum",
         "rpc":           "https://rpc.ankr.com/eth",
         "symbol":        "ETH",
         "gas_token_usd": 3000,
         "1inch_chain":   "1",
         "lifi_chain":    "ETH",
+    },
+    56: {  # BSC
+        "name":          "BSC",
+        "rpc":           "https://bsc-dataseed.binance.org/",
+        "symbol":        "BNB",
+        "gas_token_usd": 600,
+        "1inch_chain":   "56",
+        "lifi_chain":    "BSC",
+    },
+    43114: {  # Avalanche
+        "name":          "Avalanche",
+        "rpc":           "https://api.avax.network/ext/bc/C/rpc",
+        "symbol":        "AVAX",
+        "gas_token_usd": 35,
+        "1inch_chain":   "43114",
+        "lifi_chain":    "AVAX",
     },
     137: {
         "name":          "Polygon",

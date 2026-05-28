@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from config import (
     TOKENS, NETWORKS, PARES_MONITORADOS,
     MIN_SPREAD_PCT, MIN_LUCRO_USD,
-    SLIPPAGE_PCT, AMOUNT_USDT_PADRAO
+    SLIPPAGE_PCT, AMOUNT_USDT_PADRAO, pares_por_estrategia
 )
 from engine.prices import buscar_todos_precos, cotacao_usd_brl_atual, buscar_saldo_polygon
 from engine.executor import executar_swap
@@ -72,18 +72,20 @@ def estimar_fee_swap(chain_id: int, amount_usd: float) -> float:
 async def detectar_oportunidades(
     amount_usd: float = AMOUNT_USDT_PADRAO,
     saldos_por_chain: dict[int, dict[str, float]] | None = None,
+    pares_monitorados: dict[int, list[tuple[str, str]]] | None = None,
     moedas_permitidas: set[str] | None = None,
     min_spread_pct: float | None = None,
     min_lucro_usd: float | None = None,
 ) -> list[Oportunidade]:
-    precos = await buscar_todos_precos()
+    pares_ativos = pares_monitorados or PARES_MONITORADOS
+    precos = await buscar_todos_precos(pares_monitorados=pares_ativos)
     usd_brl = await cotacao_usd_brl_atual()
     preco_brl_teorico_usd = 1.0 / usd_brl if usd_brl > 0 else 0.2
     oportunidades = []
     spread_minimo = MIN_SPREAD_PCT if min_spread_pct is None else float(min_spread_pct)
     lucro_minimo = MIN_LUCRO_USD if min_lucro_usd is None else float(min_lucro_usd)
 
-    for chain_id, pares in PARES_MONITORADOS.items():
+    for chain_id, pares in pares_ativos.items():
         precos_rede = precos.get(chain_id, {})
         rede_nome   = NETWORKS[chain_id]["name"]
 
@@ -248,9 +250,12 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
             moedas_usuario = bot_data.get(f"moedas_usuario_{telegram_id}") or set()
             spread_usuario = bot_data.get(f"spread_usuario_{telegram_id}")
             lucro_usuario = bot_data.get(f"lucro_usuario_{telegram_id}")
+            strategy = (user.get("strategy") or "stable").strip().lower()
+            pares_ativos = pares_por_estrategia(strategy)
 
             oportunidades = await detectar_oportunidades(
                 saldos_por_chain=saldos_por_chain,
+                pares_monitorados=pares_ativos,
                 moedas_permitidas=set(moedas_usuario) if moedas_usuario else None,
                 min_spread_pct=float(spread_usuario) if spread_usuario is not None else None,
                 min_lucro_usd=float(lucro_usuario) if lucro_usuario is not None else None,
