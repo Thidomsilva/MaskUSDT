@@ -12,7 +12,9 @@ from urllib.request import Request, urlopen
 from telegram import BotCommand, MenuButtonCommands
 from telegram.ext import ApplicationBuilder
 
-from vault.vault import init_db
+from config import INTERVALO_SCAN_SEG
+from engine.arbitrage import loop_usuario
+from vault.vault import init_db, listar_usuarios_monitorando
 from bot.handlers import registrar_todos_handlers
 from bot.admin import registrar_admin_handlers
 from bot.dashboard import registrar_dashboard_handlers
@@ -128,6 +130,14 @@ async def _post_init_config_menu(app) -> None:
         await app.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
     except Exception as exc:
         logger.warning(f"Falha ao configurar menu de comandos no Telegram: {exc}")
+
+    usuarios_monitorando = listar_usuarios_monitorando()
+    for uid in usuarios_monitorando:
+        app.bot_data[f"running_{uid}"] = True
+        app.create_task(loop_usuario(uid, app.bot, app.bot_data, intervalo=INTERVALO_SCAN_SEG))
+
+    if usuarios_monitorando:
+        logger.info("Monitores retomados automaticamente no boot: %s", ", ".join(str(uid) for uid in usuarios_monitorando))
 
 
 def main():

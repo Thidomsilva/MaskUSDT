@@ -71,17 +71,25 @@ def estimar_fee_swap(chain_id: int, amount_usd: float) -> float:
 async def detectar_oportunidades(
     amount_usd: float = AMOUNT_USDT_PADRAO,
     saldos_por_chain: dict[int, dict[str, float]] | None = None,
+    moedas_permitidas: set[str] | None = None,
+    min_spread_pct: float | None = None,
+    min_lucro_usd: float | None = None,
 ) -> list[Oportunidade]:
     precos = await buscar_todos_precos()
     usd_brl = await cotacao_usd_brl_atual()
     preco_brl_teorico_usd = 1.0 / usd_brl if usd_brl > 0 else 0.2
     oportunidades = []
+    spread_minimo = MIN_SPREAD_PCT if min_spread_pct is None else float(min_spread_pct)
+    lucro_minimo = MIN_LUCRO_USD if min_lucro_usd is None else float(min_lucro_usd)
 
     for chain_id, pares in PARES_MONITORADOS.items():
         precos_rede = precos.get(chain_id, {})
         rede_nome   = NETWORKS[chain_id]["name"]
 
         for token_brl, token_usd in pares:
+            if moedas_permitidas and token_brl not in moedas_permitidas and token_usd not in moedas_permitidas:
+                continue
+
             preco_brl = precos_rede.get(token_brl)
             preco_usd = precos_rede.get(token_usd)
             if not preco_brl or not preco_usd:
@@ -128,7 +136,7 @@ async def detectar_oportunidades(
             else:
                 spread_pct = abs(preco_brl - preco_usd) / preco_usd * 100
 
-            if spread_pct < MIN_SPREAD_PCT:
+            if spread_pct < spread_minimo:
                 continue
 
             if token_brl in TOKENS_BRL and token_usd in TOKENS_USD:
@@ -186,7 +194,7 @@ async def detectar_oportunidades(
             if lucro_usd <= 0:
                 continue
 
-            if lucro_usd < MIN_LUCRO_USD:
+            if lucro_usd < lucro_minimo:
                 continue
 
             oportunidades.append(Oportunidade(
@@ -236,7 +244,16 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                 except Exception as e:
                     logger.warning(f"[uid={telegram_id}] Falha ao consultar saldo da Polygon: {e}")
 
-            oportunidades = await detectar_oportunidades(saldos_por_chain=saldos_por_chain)
+            moedas_usuario = bot_data.get(f"moedas_usuario_{telegram_id}") or set()
+            spread_usuario = bot_data.get(f"spread_usuario_{telegram_id}")
+            lucro_usuario = bot_data.get(f"lucro_usuario_{telegram_id}")
+
+            oportunidades = await detectar_oportunidades(
+                saldos_por_chain=saldos_por_chain,
+                moedas_permitidas=set(moedas_usuario) if moedas_usuario else None,
+                min_spread_pct=float(spread_usuario) if spread_usuario is not None else None,
+                min_lucro_usd=float(lucro_usuario) if lucro_usuario is not None else None,
+            )
             if oportunidades:
                 melhor = oportunidades[0]
 

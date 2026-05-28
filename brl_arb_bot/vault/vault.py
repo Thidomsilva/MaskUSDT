@@ -184,6 +184,7 @@ def init_db():
             dex_pk       TEXT,
             trading_mode TEXT DEFAULT 'manual',
             strategy     TEXT DEFAULT 'stable',
+            monitor_enabled INTEGER DEFAULT 0,
             active       INTEGER DEFAULT 1,
             created_at   TEXT DEFAULT (datetime('now'))
         )
@@ -227,6 +228,8 @@ def init_db():
         con.execute("ALTER TABLE users ADD COLUMN trading_mode TEXT DEFAULT 'manual'")
     if "strategy" not in cols:
         con.execute("ALTER TABLE users ADD COLUMN strategy TEXT DEFAULT 'stable'")
+    if "monitor_enabled" not in cols:
+        con.execute("ALTER TABLE users ADD COLUMN monitor_enabled INTEGER DEFAULT 0")
 
     con.commit()
     con.close()
@@ -252,7 +255,7 @@ def save_user(telegram_id: int, username: str, address: str, pk: str):
 def get_user(telegram_id: int, include_pk: bool = False) -> dict | None:
     con = sqlite3.connect(VAULT_DB)
     row = con.execute(
-        "SELECT telegram_id,username,dex_address,dex_pk,trading_mode,strategy,active,created_at "
+        "SELECT telegram_id,username,dex_address,dex_pk,trading_mode,strategy,monitor_enabled,active,created_at "
         "FROM users WHERE telegram_id=? AND active=1", (telegram_id,)
     ).fetchone()
     con.close()
@@ -264,8 +267,9 @@ def get_user(telegram_id: int, include_pk: bool = False) -> dict | None:
         "dex_address": row[2],
         "trading_mode": row[4] or "manual",
         "strategy":    row[5] or "stable",
-        "active":      row[6],
-        "created_at":  row[7],
+        "monitor_enabled": row[6] or 0,
+        "active":      row[7],
+        "created_at":  row[8],
     }
     if include_pk:
         user["dex_pk"] = _dec(row[3])
@@ -298,6 +302,25 @@ def set_user_strategy(telegram_id: int, strategy: str) -> None:
     )
     con.commit()
     con.close()
+
+
+def set_user_monitor_enabled(telegram_id: int, enabled: bool) -> None:
+    con = sqlite3.connect(VAULT_DB)
+    con.execute(
+        "UPDATE users SET monitor_enabled=? WHERE telegram_id=?",
+        (1 if enabled else 0, telegram_id),
+    )
+    con.commit()
+    con.close()
+
+
+def listar_usuarios_monitorando() -> list[int]:
+    con = sqlite3.connect(VAULT_DB)
+    rows = con.execute(
+        "SELECT telegram_id FROM users WHERE active=1 AND monitor_enabled=1 ORDER BY created_at ASC"
+    ).fetchall()
+    con.close()
+    return [int(row[0]) for row in rows]
 
 
 def user_exists(telegram_id: int) -> bool:
