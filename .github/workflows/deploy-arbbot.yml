@@ -94,8 +94,16 @@ jobs:
             set -euo pipefail
             cd '${DEPLOY_PATH}'
             systemctl restart '${DEPLOY_SERVICE}'
-            systemctl is-active --quiet '${DEPLOY_SERVICE}'
+            sleep 8
+            if ! systemctl is-active --quiet '${DEPLOY_SERVICE}'; then
+              echo 'Servico nao permaneceu ativo apos restart.'
+              systemctl status '${DEPLOY_SERVICE}' --no-pager -l || true
+              journalctl -u '${DEPLOY_SERVICE}' -n 120 --no-pager || true
+              exit 1
+            fi
             echo 'Deploy concluido com sucesso.'
             echo 'Service:' '${DEPLOY_SERVICE}'
             systemctl status '${DEPLOY_SERVICE}' --no-pager -l | head -n 30
+            echo 'Journal tail:'
+            journalctl -u '${DEPLOY_SERVICE}' -n 40 --no-pager
           "
