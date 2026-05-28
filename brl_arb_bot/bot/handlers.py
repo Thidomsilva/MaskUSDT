@@ -524,6 +524,34 @@ async def callback_botao(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    if data == "painel|historico":
+        hist = historico_usuario(uid, limite=10)
+        if not hist:
+            await query.message.reply_text("Nenhuma operação registrada ainda.")
+            return
+        linhas = ["📋 *Últimas operações:*\n"]
+        for op in hist:
+            emoji = "✅" if op["status"] == "sucesso" else "❌"
+            linhas.append(
+                f"{emoji} {op['rede']} | {op['par']} | "
+                f"spread {op['spread_pct']:.2f}% | lucro ${op['lucro_usd']:.4f}"
+            )
+        await query.message.reply_text("\n".join(linhas), parse_mode="Markdown")
+        return
+
+    if data == "painel|modo":
+        user = get_user(uid)
+        if not user:
+            await query.answer("Use /cadastrar primeiro.", show_alert=True)
+            return
+        modo = _modo_usuario(user)
+        await query.message.reply_text(
+            _texto_modo(modo),
+            parse_mode="Markdown",
+            reply_markup=_teclado_modo(modo),
+        )
+        return
+
     if data == "start|admin":
         if not is_admin(uid):
             await query.answer("⛔ Acesso restrito.", show_alert=True)
@@ -1215,5 +1243,5 @@ def registrar_todos_handlers(app):
     ))
     app.add_handler(CallbackQueryHandler(
         callback_botao,
-        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|estrategia$|start\|painel$|start\|admin$|mode\||strategy\||painel\|ciclo$|painel\|historico$|painel\|modo$)"
+        pattern=r"^(exec\||ignore$|start\|iniciar$|start\|modo$|start\|estrategia$|start\|painel$|start\|admin$|mode\||strategy\||painel\|ciclo$|painel\|historico$|painel\|modo$|painel\|config_filtros$|config\|moedas$|config\|spread$|config\|lucro$|setmoeda\||delmoeda\||moedas\|limpar$|setspread\||setlucro\|)"
     ))
