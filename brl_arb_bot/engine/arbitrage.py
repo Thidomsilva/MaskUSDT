@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 AUTO_COOLDOWN_SEG = int(os.getenv("AUTO_COOLDOWN_SEG", "45"))
 MANUAL_ALERT_COOLDOWN_SEG = int(os.getenv("MANUAL_ALERT_COOLDOWN_SEG", "45"))
+MONITOR_IGNORE_BALANCE = os.getenv("MONITOR_IGNORE_BALANCE", "false").strip().lower() in {"1", "true", "yes", "y", "on"}
 TOKENS_USD = {"USDT", "USDC", "DAI"}
 TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
 INVENTORY_MIN_USD = float(os.getenv("INVENTORY_MIN_USD", "5"))
