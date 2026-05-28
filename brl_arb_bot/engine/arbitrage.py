@@ -12,7 +12,7 @@ from config import (
     MIN_SPREAD_PCT, MIN_LUCRO_USD,
     SLIPPAGE_PCT, AMOUNT_USDT_PADRAO, pares_por_estrategia
 )
-from engine.prices import buscar_todos_precos, cotacao_usd_brl_atual, buscar_saldo_polygon
+from engine.prices import buscar_todos_precos, buscar_precos_multifonte, cotacao_usd_brl_atual, buscar_saldo_polygon
 from engine.executor import executar_swap
 from vault.vault import get_user, registrar_operacao
 
@@ -23,6 +23,7 @@ MANUAL_ALERT_COOLDOWN_SEG = int(os.getenv("MANUAL_ALERT_COOLDOWN_SEG", "45"))
 MONITOR_IGNORE_BALANCE = os.getenv("MONITOR_IGNORE_BALANCE", "false").strip().lower() in {"1", "true", "yes", "y", "on"}
 TOKENS_USD = {"USDT", "USDC", "DAI"}
 TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
+TOKENS_CRYPTO = {"WETH", "WBTC", "MATIC", "LINK", "BNB", "AVAX", "JOE", "CAKE"}
 INVENTORY_MIN_USD = float(os.getenv("INVENTORY_MIN_USD", "5"))
 
 
@@ -79,6 +80,7 @@ async def detectar_oportunidades(
 ) -> list[Oportunidade]:
     pares_ativos = pares_monitorados or PARES_MONITORADOS
     precos = await buscar_todos_precos(pares_monitorados=pares_ativos)
+    precos_multifonte = await buscar_precos_multifonte(pares_monitorados=pares_ativos)
     usd_brl = await cotacao_usd_brl_atual()
     preco_brl_teorico_usd = 1.0 / usd_brl if usd_brl > 0 else 0.2
     oportunidades = []
@@ -136,6 +138,15 @@ async def detectar_oportunidades(
                         f"> cap {MAX_SPREAD_BRL_USD_PCT}% — descartado (possível erro de API)"
                     )
                     continue
+            elif token_brl in TOKENS_CRYPTO and token_usd in TOKENS_USD:
+                fontes_token = (precos_multifonte.get(chain_id, {}) or {}).get(token_brl, {})
+                if len(fontes_token) < 2:
+                    continue
+                menor_preco = min(fontes_token.values())
+                maior_preco = max(fontes_token.values())
+                if menor_preco <= 0:
+                    continue
+                spread_pct = (maior_preco - menor_preco) / menor_preco * 100
             else:
                 spread_pct = abs(preco_brl - preco_usd) / preco_usd * 100
 
@@ -156,6 +167,9 @@ async def detectar_oportunidades(
                 else:
                     token_from, token_to = token_brl, token_usd
                     direcao = f"Compra {token_usd} → Vende {token_brl}"
+            elif token_brl in TOKENS_CRYPTO and token_usd in TOKENS_USD:
+                token_from, token_to = token_usd, token_brl
+                direcao = f"Compra {token_brl} com {token_usd} (desvio multi-fonte)"
             else:
                 if preco_brl < preco_usd:
                     token_from, token_to = token_usd, token_brl

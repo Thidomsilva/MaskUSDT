@@ -401,7 +401,7 @@ ERC20_BALANCE_ABI = [{
 async def buscar_saldo_polygon(address: str) -> dict:
     """
     Retorna saldos da carteira na Polygon (rede principal).
-    Retorna: {"POL": float, "USDT": float, "USDC": float}
+    Retorna saldos dos principais ativos monitorados na Polygon.
     Falhas individuais retornam None para o token afetado.
     Tenta múltiplos RPCs em fallback para maior resiliência.
     """
@@ -447,7 +447,7 @@ async def buscar_saldo_polygon(address: str) -> dict:
         return None
 
     loop = _asyncio.get_event_loop()
-    pol, usdt, usdc, dai, brz, brla, brl1 = await _asyncio.gather(
+    pol, usdt, usdc, dai, brz, brla, brl1, weth, wbtc, matic, link, bnb = await _asyncio.gather(
         loop.run_in_executor(None, _saldo_nativo),
         loop.run_in_executor(None, _saldo_erc20, "USDT"),
         loop.run_in_executor(None, _saldo_erc20, "USDC"),
@@ -455,8 +455,26 @@ async def buscar_saldo_polygon(address: str) -> dict:
         loop.run_in_executor(None, _saldo_erc20, "BRZ"),
         loop.run_in_executor(None, _saldo_erc20, "BRLA"),
         loop.run_in_executor(None, _saldo_erc20, "BRL1"),
+        loop.run_in_executor(None, _saldo_erc20, "WETH"),
+        loop.run_in_executor(None, _saldo_erc20, "WBTC"),
+        loop.run_in_executor(None, _saldo_erc20, "MATIC"),
+        loop.run_in_executor(None, _saldo_erc20, "LINK"),
+        loop.run_in_executor(None, _saldo_erc20, "BNB"),
     )
-    return {"POL": pol, "USDT": usdt, "USDC": usdc, "DAI": dai, "BRZ": brz, "BRLA": brla, "BRL1": brl1}
+    return {
+        "POL": pol,
+        "USDT": usdt,
+        "USDC": usdc,
+        "DAI": dai,
+        "BRZ": brz,
+        "BRLA": brla,
+        "BRL1": brl1,
+        "WETH": weth,
+        "WBTC": wbtc,
+        "MATIC": matic,
+        "LINK": link,
+        "BNB": bnb,
+    }
 
 
 def _normalizar_preco(preco: float | None) -> float | None:
