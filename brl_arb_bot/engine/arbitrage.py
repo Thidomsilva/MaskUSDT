@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 AUTO_COOLDOWN_SEG = int(os.getenv("AUTO_COOLDOWN_SEG", "45"))
 MANUAL_ALERT_COOLDOWN_SEG = int(os.getenv("MANUAL_ALERT_COOLDOWN_SEG", "45"))
+MANUAL_ALERT_REPEAT_SEG = int(os.getenv("MANUAL_ALERT_REPEAT_SEG", "300"))
 MONITOR_IGNORE_BALANCE = os.getenv("MONITOR_IGNORE_BALANCE", "false").strip().lower() in {"1", "true", "yes", "y", "on"}
 TOKENS_USD = {"USDT", "USDC", "DAI"}
 TOKENS_BRL = {"BRZ", "BRLA", "BRL1"}
@@ -398,13 +399,24 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                         f"{melhor.chain_id}|{melhor.token_brl}|{melhor.token_usd}|"
                         f"{token_from}|{token_to}|{round(melhor.amount_usd, 2)}"
                     )
+                    metricas = (
+                        round(melhor.spread_pct, 3),
+                        round(melhor.lucro_usd, 3),
+                    )
                     last_sig_key = f"manual_last_sig_{telegram_id}"
+                    last_metrics_key = f"manual_last_metrics_{telegram_id}"
                     last_ts_key = f"manual_last_alert_ts_{telegram_id}"
                     last_sig = bot_data.get(last_sig_key)
+                    last_metrics = bot_data.get(last_metrics_key)
                     last_ts = float(bot_data.get(last_ts_key, 0.0))
 
-                    if sig == last_sig and (now - last_ts) < MANUAL_ALERT_COOLDOWN_SEG:
-                        logger.info(f"[uid={telegram_id}] Cooldown ativo do alerta manual.")
+                    mesmo_sinal = sig == last_sig
+                    mudou_materialmente = last_metrics != metricas
+
+                    if mesmo_sinal and not mudou_materialmente and (now - last_ts) < MANUAL_ALERT_REPEAT_SEG:
+                        logger.info(f"[uid={telegram_id}] Repetição do mesmo alerta manual suprimida.")
+                    elif mesmo_sinal and mudou_materialmente and (now - last_ts) < MANUAL_ALERT_COOLDOWN_SEG:
+                        logger.info(f"[uid={telegram_id}] Cooldown ativo do alerta manual com pequena variação.")
                     else:
                         texto, teclado = montar_alerta(melhor, bot_data=bot_data, uid=telegram_id)
                         await bot.send_message(
@@ -414,6 +426,7 @@ async def loop_usuario(telegram_id: int, bot, bot_data: dict, intervalo: int = 2
                             reply_markup=teclado
                         )
                         bot_data[last_sig_key] = sig
+                        bot_data[last_metrics_key] = metricas
                         bot_data[last_ts_key] = now
                         logger.info(f"[uid={telegram_id}] Alerta enviado: {melhor.rede} {melhor.token_brl}/{melhor.token_usd}")
         except Exception as e:
