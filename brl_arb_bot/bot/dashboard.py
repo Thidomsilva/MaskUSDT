@@ -12,6 +12,23 @@ from vault.vault import get_user, user_exists, historico_usuario
 logger = logging.getLogger(__name__)
 
 
+def _formatar_saldos_polygon(saldos: dict) -> str:
+    linhas = []
+    if saldos.get("POL") is not None: linhas.append(f"  • POL:   `{saldos['POL']:.4f}`")
+    if saldos.get("USDT") is not None: linhas.append(f"  • USDT:  `{saldos['USDT']:.2f}`")
+    if saldos.get("USDC") is not None: linhas.append(f"  • USDC:  `{saldos['USDC']:.2f}`")
+    if saldos.get("DAI") is not None: linhas.append(f"  • DAI:   `{saldos['DAI']:.2f}`")
+    if saldos.get("BRZ") is not None: linhas.append(f"  • BRZ:   `{saldos['BRZ']:.2f}`")
+    if saldos.get("BRLA") is not None: linhas.append(f"  • BRLA:  `{saldos['BRLA']:.2f}`")
+    if saldos.get("BRL1") is not None: linhas.append(f"  • BRL1:  `{saldos['BRL1']:.2f}`")
+    if saldos.get("WETH") is not None: linhas.append(f"  • WETH:  `{saldos['WETH']:.6f}`")
+    if saldos.get("WBTC") is not None: linhas.append(f"  • WBTC:  `{saldos['WBTC']:.6f}`")
+    if saldos.get("MATIC") is not None: linhas.append(f"  • MATIC: `{saldos['MATIC']:.4f}`")
+    if saldos.get("LINK") is not None: linhas.append(f"  • LINK:  `{saldos['LINK']:.4f}`")
+    if saldos.get("BNB") is not None: linhas.append(f"  • BNB:   `{saldos['BNB']:.4f}`")
+    return "\n".join(linhas) if linhas else "_indisponível_"
+
+
 # ─── Menu do aluno ────────────────────────────────────────────────────────────
 
 def _menu_aluno() -> InlineKeyboardMarkup:
@@ -190,14 +207,7 @@ async def _mostrar_carteira(query, user: dict):
     saldo_txt = "_indisponível_"
     try:
         saldos = await buscar_saldo_polygon(addr)
-        linhas = []
-        if saldos.get("POL")  is not None: linhas.append(f"  • POL:   `{saldos['POL']:.4f}`")
-        if saldos.get("USDT") is not None: linhas.append(f"  • USDT:  `{saldos['USDT']:.2f}`")
-        if saldos.get("USDC") is not None: linhas.append(f"  • USDC:  `{saldos['USDC']:.2f}`")
-        if saldos.get("BRZ")  is not None: linhas.append(f"  • BRZ:   `{saldos['BRZ']:.2f}`")
-        if saldos.get("BRLA") is not None: linhas.append(f"  • BRLA:  `{saldos['BRLA']:.2f}`")
-        if saldos.get("BRL1") is not None: linhas.append(f"  • BRL1:  `{saldos['BRL1']:.2f}`")
-        saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
+        saldo_txt = _formatar_saldos_polygon(saldos)
     except Exception:
         logger.exception("Falha ao buscar saldos no painel uid=%s addr=%s", user.get("telegram_id"), addr)
 

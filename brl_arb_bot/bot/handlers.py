@@ -266,6 +266,23 @@ def _texto_modo(modo: str) -> str:
     )
 
 
+def _formatar_saldos_polygon(saldos: dict) -> str:
+    linhas = []
+    if saldos.get("POL") is not None: linhas.append(f"  • POL:   `{saldos['POL']:.4f}`")
+    if saldos.get("USDT") is not None: linhas.append(f"  • USDT:  `{saldos['USDT']:.2f}`")
+    if saldos.get("USDC") is not None: linhas.append(f"  • USDC:  `{saldos['USDC']:.2f}`")
+    if saldos.get("DAI") is not None: linhas.append(f"  • DAI:   `{saldos['DAI']:.2f}`")
+    if saldos.get("BRZ") is not None: linhas.append(f"  • BRZ:   `{saldos['BRZ']:.2f}`")
+    if saldos.get("BRLA") is not None: linhas.append(f"  • BRLA:  `{saldos['BRLA']:.2f}`")
+    if saldos.get("BRL1") is not None: linhas.append(f"  • BRL1:  `{saldos['BRL1']:.2f}`")
+    if saldos.get("WETH") is not None: linhas.append(f"  • WETH:  `{saldos['WETH']:.6f}`")
+    if saldos.get("WBTC") is not None: linhas.append(f"  • WBTC:  `{saldos['WBTC']:.6f}`")
+    if saldos.get("MATIC") is not None: linhas.append(f"  • MATIC: `{saldos['MATIC']:.4f}`")
+    if saldos.get("LINK") is not None: linhas.append(f"  • LINK:  `{saldos['LINK']:.4f}`")
+    if saldos.get("BNB") is not None: linhas.append(f"  • BNB:   `{saldos['BNB']:.4f}`")
+    return "\n".join(linhas) if linhas else "_indisponível_"
+
+
 def _resolver_tokens_execucao(oport) -> tuple[str, str]:
     token_from = getattr(oport, "token_from", None)
     token_to = getattr(oport, "token_to", None)
@@ -756,20 +773,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         saldo_txt = "⏳ carregando..."
         try:
             saldos = await buscar_saldo_polygon(addr)
-            pol  = saldos.get("POL")
-            usdt = saldos.get("USDT")
-            usdc = saldos.get("USDC")
-            brz  = saldos.get("BRZ")
-            brla = saldos.get("BRLA")
-            brl1 = saldos.get("BRL1")
-            linhas = []
-            if pol  is not None: linhas.append(f"  • POL:   `{pol:.4f}`")
-            if usdt is not None: linhas.append(f"  • USDT:  `{usdt:.2f}`")
-            if usdc is not None: linhas.append(f"  • USDC:  `{usdc:.2f}`")
-            if brz  is not None: linhas.append(f"  • BRZ:   `{brz:.2f}`")
-            if brla is not None: linhas.append(f"  • BRLA:  `{brla:.2f}`")
-            if brl1 is not None: linhas.append(f"  • BRL1:  `{brl1:.2f}`")
-            saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
+            saldo_txt = _formatar_saldos_polygon(saldos)
         except Exception:
             logger.exception("Falha ao buscar saldos no /start uid=%s addr=%s", uid, addr)
             saldo_txt = "_indisponível_"
@@ -985,15 +989,7 @@ async def status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     saldo_txt = "_indisponível_"
     try:
         saldos = await buscar_saldo_polygon(addr)
-        linhas = []
-        if saldos.get("POL")  is not None: linhas.append(f"  • POL:   `{saldos['POL']:.4f}`")
-        if saldos.get("USDT") is not None: linhas.append(f"  • USDT:  `{saldos['USDT']:.2f}`")
-        if saldos.get("USDC") is not None: linhas.append(f"  • USDC:  `{saldos['USDC']:.2f}`")
-        if saldos.get("DAI")  is not None: linhas.append(f"  • DAI:   `{saldos['DAI']:.2f}`")
-        if saldos.get("BRZ")  is not None: linhas.append(f"  • BRZ:   `{saldos['BRZ']:.2f}`")
-        if saldos.get("BRLA") is not None: linhas.append(f"  • BRLA:  `{saldos['BRLA']:.2f}`")
-        if saldos.get("BRL1") is not None: linhas.append(f"  • BRL1:  `{saldos['BRL1']:.2f}`")
-        saldo_txt = "\n".join(linhas) if linhas else "_indisponível_"
+        saldo_txt = _formatar_saldos_polygon(saldos)
     except Exception:
         logger.exception("Falha ao buscar saldos no /status uid=%s addr=%s", uid, addr)
 
